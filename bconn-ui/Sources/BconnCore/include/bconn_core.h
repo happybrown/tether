@@ -37,8 +37,9 @@ void bconn_stop(void);
 
 BconnStatus bconn_get_status(void);
 
-// 현재 호스트의 로컬 IP 목록 (null-terminated 문자열 배열, 최대 8개)
-int bconn_get_local_ips(char out[][64], int max_count);
+// 현재 호스트의 로컬 IP 목록 — '\n'으로 구분된 문자열을 out 버퍼에 기록
+// out_size: 버퍼 크기, 반환값: 기록된 IP 개수
+int bconn_get_local_ips(char* out, int out_size);
 
 #ifdef __cplusplus
 }

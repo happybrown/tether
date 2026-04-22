@@ -15,13 +15,14 @@ class BconnManager: ObservableObject {
     }
 
     func refreshLocalIPs() {
-        var buf = [[CChar]](repeating: [CChar](repeating: 0, count: 64), count: 8)
+        var buf = [CChar](repeating: 0, count: 512)
         let count = buf.withUnsafeMutableBufferPointer { ptr in
-            bconn_get_local_ips(ptr.baseAddress.map {
-                UnsafeMutablePointer(OpaquePointer($0))
-            }, 8)
+            bconn_get_local_ips(ptr.baseAddress, Int32(ptr.count))
         }
-        localIPs = (0..<Int(count)).map { String(cString: buf[$0]) }
+        guard count > 0 else { localIPs = []; return }
+        localIPs = String(cString: buf)
+            .split(separator: "\n")
+            .map(String.init)
     }
 
     func start() {

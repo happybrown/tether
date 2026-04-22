@@ -578,19 +578,28 @@ BconnStatus bconn_get_status() {
     return g_status.load();
 }
 
-int bconn_get_local_ips(char out[][64], int max_count) {
+int bconn_get_local_ips(char* out, int out_size) {
     struct ifaddrs* ifap = nullptr;
     if (getifaddrs(&ifap) != 0) return 0;
 
     int count = 0;
-    for (struct ifaddrs* ifa = ifap; ifa && count < max_count; ifa = ifa->ifa_next) {
+    int pos   = 0;
+    for (struct ifaddrs* ifa = ifap; ifa; ifa = ifa->ifa_next) {
         if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
-        // loopback 제외
         if (strncmp(ifa->ifa_name, "lo", 2) == 0) continue;
+
+        char ip[64] = {};
         getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
-                    out[count], 64, nullptr, 0, NI_NUMERICHOST);
+                    ip, sizeof(ip), nullptr, 0, NI_NUMERICHOST);
+
+        int len = (int)strlen(ip);
+        if (pos + len + 2 > out_size) break; // 버퍼 초과 방지
+        memcpy(out + pos, ip, len);
+        out[pos + len] = '\n';
+        pos += len + 1;
         ++count;
     }
+    if (pos < out_size) out[pos] = '\0';
     freeifaddrs(ifap);
     return count;
 }
