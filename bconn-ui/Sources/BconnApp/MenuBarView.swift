@@ -4,6 +4,7 @@ import BconnCore
 struct MenuBarView: View {
     @ObservedObject private var manager  = BconnManager.shared
     @ObservedObject private var settings = AppSettings.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,7 +31,7 @@ struct MenuBarView: View {
             // ── 연결 정보 ──────────────────────────────────────────
             VStack(alignment: .leading, spacing: 4) {
                 if settings.mode == .host {
-                    InfoRow(label: "포트",       value: "\(settings.port)")
+                    InfoRow(label: "포트",        value: "\(settings.port)")
                     InfoRow(label: "Client 위치", value: settings.clientEdge.label)
                     if let ip = manager.localIPs.first {
                         InfoRow(label: "내 IP", value: ip)
@@ -45,22 +46,18 @@ struct MenuBarView: View {
 
             Divider()
 
-            // ── 제어 버튼 ──────────────────────────────────────────
-            HStack(spacing: 8) {
+            // ── 시작 / 중지 ────────────────────────────────────────
+            Group {
                 if manager.isRunning {
-                    Button(action: { manager.stop() }) {
+                    Button(role: .destructive, action: { manager.stop() }) {
                         Label("중지", systemImage: "stop.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
                 } else {
                     Button(action: { manager.start() }) {
                         Label("시작", systemImage: "play.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
                     .disabled(!canStart)
                 }
             }
@@ -70,15 +67,15 @@ struct MenuBarView: View {
             Divider()
 
             // ── 메뉴 액션 ──────────────────────────────────────────
-            VStack(spacing: 0) {
-                MenuButton(label: "설정...", shortcut: ",") {
-                    AppDelegate.shared.openSettings()
-                }
-                MenuButton(label: "종료", shortcut: "q") {
-                    NSApplication.shared.terminate(nil)
-                }
+            Button("설정...") {
+                openWindow(id: "settings")
             }
-            .padding(.vertical, 4)
+            .keyboardShortcut(",")
+
+            Button("종료", role: .destructive) {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("q")
         }
         .frame(width: 240)
     }
@@ -102,28 +99,5 @@ private struct InfoRow: View {
                 .font(.caption)
                 .textSelection(.enabled)
         }
-    }
-}
-
-private struct MenuButton: View {
-    let label: String
-    let shortcut: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(label)
-                Spacer()
-                Text("⌘\(shortcut.uppercased())")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(KeyEquivalent(shortcut.first!), modifiers: .command)
     }
 }
