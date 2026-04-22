@@ -17,10 +17,10 @@ static inline int make_udp_sock() {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) return -1;
 
-    // 커널 버퍼 최소화: 버퍼가 크면 오래된 패킷이 쌓여 지연 증가
-    int buf = 4096;
-    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf));
-    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &buf, sizeof(buf));
+    // 송신 버퍼 최소화: 오래된 패킷이 쌓이지 않도록
+    // 수신 버퍼는 패킷 유실 방지를 위해 충분히 유지
+    int sndbuf = 4096;
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
     // DSCP EF(Expedited Forwarding) — 라우터에서 최우선 처리
     int tos = IPTOS_LOWDELAY;

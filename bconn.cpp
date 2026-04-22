@@ -429,8 +429,17 @@ static int run_client(const char* host_ip, int port) {
     );
     engine.start();
 
-    // recv 루프는 NetworkEngine 내부에서 돌므로 여기선 대기만
-    std::cout << "host 연결 완료. 대기 중...\n";
+    // 시작 직후 host에 화면 너비 전달 — host의 peer_known을 설정해 송신 가능 상태로 만듦
+    {
+        int32_t w = (int32_t)screen.width();
+        MousePacket info{};
+        info.event_type = EVENT_CLIENT_INFO;
+        info.dx = static_cast<int16_t>(w & 0xFFFF);
+        info.dy = static_cast<int16_t>((w >> 16) & 0xFFFF);
+        engine.send_mouse(info);
+        std::cout << "host 연결 완료. 화면 너비 " << w << "px 전송\n";
+    }
+
     pause();
 
     engine.stop();
