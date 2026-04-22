@@ -153,12 +153,16 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         return event;
     }
 
-    CGWarpMouseCursorPosition(CGPointMake(g_layout.right_edge, 99999.0));
+    bool is_click  = (type == kCGEventLeftMouseDown   || type == kCGEventLeftMouseUp  ||
+                      type == kCGEventRightMouseDown  || type == kCGEventRightMouseUp ||
+                      type == kCGEventOtherMouseDown  || type == kCGEventOtherMouseUp);
+    bool is_scroll = (type == kCGEventScrollWheel);
 
-    bool is_click = (type == kCGEventLeftMouseDown  || type == kCGEventLeftMouseUp ||
-                     type == kCGEventRightMouseDown || type == kCGEventRightMouseUp);
+    // 스크롤은 커서 위치와 무관하므로 warp 생략 (스크롤 중 불필요한 호출 방지)
+    if (!is_scroll)
+        CGWarpMouseCursorPosition(CGPointMake(g_layout.right_edge, 99999.0));
 
-    if (!is_click) {
+    if (!is_click && !is_scroll) {
         if (g_remote.entry_guard > 0) { --g_remote.entry_guard; return NULL; }
 
         int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
@@ -167,13 +171,22 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         if (g_remote.virtual_x <= 0.0) { leave_remote(engine); return NULL; }
     }
 
-    int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-    int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-
     MousePacket pkt{};
-    pkt.dx         = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
-    pkt.dy         = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     pkt.event_type = type;
+
+    if (is_scroll) {
+        // 스크롤 delta (line 단위, field 1/2)를 dx/dy에 담아 전송
+        int64_t sdx = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2);
+        int64_t sdy = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);
+        pkt.dx = static_cast<int16_t>(std::clamp(sdx, -32768LL, 32767LL));
+        pkt.dy = static_cast<int16_t>(std::clamp(sdy, -32768LL, 32767LL));
+    } else {
+        int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+        int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+        pkt.dx = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
+        pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
+    }
+
     engine.push_mouse(pkt);
     return NULL;
 }
@@ -215,13 +228,17 @@ static int run_host(const char* client_ip, int port) {
     NetworkEngine engine(client_ip, port, on_mouse_recv);
     engine.start();
 
-    CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)        |
+    CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)         |
                              CGEventMaskBit(kCGEventLeftMouseDragged)  |
                              CGEventMaskBit(kCGEventRightMouseDragged) |
+                             CGEventMaskBit(kCGEventOtherMouseDragged) |
                              CGEventMaskBit(kCGEventLeftMouseDown)     |
                              CGEventMaskBit(kCGEventLeftMouseUp)       |
                              CGEventMaskBit(kCGEventRightMouseDown)    |
-                             CGEventMaskBit(kCGEventRightMouseUp);
+                             CGEventMaskBit(kCGEventRightMouseUp)      |
+                             CGEventMaskBit(kCGEventOtherMouseDown)    |
+                             CGEventMaskBit(kCGEventOtherMouseUp)      |
+                             CGEventMaskBit(kCGEventScrollWheel);
 
     CFMachPortRef mouse_tap = CGEventTapCreate(
         kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
@@ -324,17 +341,29 @@ static void handle_show(bool& pos_init, bool& cursor_hidden) {
 static void handle_move(const MousePacket& pkt, const ScreenBounds& screen,
                         double& cur_x, double& cur_y)
 {
+    CGEventType etype = (CGEventType)pkt.event_type;
+
+    if (etype == kCGEventScrollWheel) {
+        CGEventRef ev = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 2,
+                                                      pkt.dy, pkt.dx);
+        CGEventPost(kCGHIDEventTap, ev);
+        CFRelease(ev);
+        return;
+    }
+
     cur_x = std::clamp(cur_x + pkt.dx, screen.left,  screen.right  - 1.0);
     cur_y = std::clamp(cur_y + pkt.dy, screen.top,   screen.bottom - 1.0);
 
     CGMouseButton btn = kCGMouseButtonLeft;
-    if (pkt.event_type == kCGEventRightMouseDown ||
-        pkt.event_type == kCGEventRightMouseUp   ||
-        pkt.event_type == kCGEventRightMouseDragged)
+    if (etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
+        etype == kCGEventRightMouseDragged)
         btn = kCGMouseButtonRight;
+    else if (etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp ||
+             etype == kCGEventOtherMouseDragged)
+        btn = kCGMouseButtonCenter;
 
     CGPoint pos = CGPointMake(cur_x, cur_y);
-    CGEventRef ev = CGEventCreateMouseEvent(NULL, (CGEventType)pkt.event_type, pos, btn);
+    CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
     CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, pkt.dx);
     CGEventSetIntegerValueField(ev, kCGMouseEventDeltaY, pkt.dy);
     CGEventPost(kCGHIDEventTap, ev);
