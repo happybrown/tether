@@ -89,23 +89,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let win = settingsWindow, win.isVisible {
             win.makeKeyAndOrderFront(nil)
+            NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let window = NSWindow(
+        // NSPanel: accessory 앱에서도 키 윈도우가 될 수 있음
+        let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 400),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        window.title = "bconn 설정"
-        window.contentViewController = NSHostingController(rootView: SettingsView())
-        window.center()
-        window.isReleasedWhenClosed = false
-        settingsWindow = window
-        window.makeKeyAndOrderFront(nil)
+        panel.title = "bconn 설정"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.contentViewController = NSHostingController(rootView: SettingsView())
+        panel.center()
+        settingsWindow = panel
+
+        // accessory 앱이 창을 띄울 때는 잠깐 regular로 전환해야 포커스를 받음
+        NSApp.setActivationPolicy(.regular)
+        panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // 창이 닫히면 다시 accessory로 복귀
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: panel,
+            queue: .main
+        ) { _ in
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
 
