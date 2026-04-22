@@ -96,6 +96,7 @@ struct RemoteState {
 };
 
 static RemoteState g_state;
+static NetworkEngine* g_engine = nullptr; // 키보드 콜백에서 접근
 
 static void enter_remote(NetworkEngine& engine, CGPoint loc) {
     g_state.active      = true;
@@ -118,7 +119,7 @@ static void enter_remote(NetworkEngine& engine, CGPoint loc) {
     MousePacket pkt{};
     pkt.event_type = EVENT_SYNC_CURSOR;
     pkt.dy = static_cast<int16_t>(y_ratio * 32767.0);
-    engine.push_event(pkt);
+    engine.push_mouse(pkt);
 }
 
 static void leave_remote(NetworkEngine& engine) {
@@ -129,14 +130,14 @@ static void leave_remote(NetworkEngine& engine) {
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SHOW_CURSOR;
-    engine.push_event(pkt);
+    engine.push_mouse(pkt);
 
     CGWarpMouseCursorPosition(CGPointMake(g_layout.right_edge - 50.0, g_state.entry_y));
     CGAssociateMouseAndMouseCursorPosition(true);
     show_cursor();
 }
 
-// ── 이벤트 콜백 ─────────────────────────────────────────────────────
+// ── 마우스 이벤트 콜백 ───────────────────────────────────────────────
 
 static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void* userInfo) {
     auto& engine = *static_cast<NetworkEngine*>(userInfo);
@@ -187,8 +188,35 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     pkt.dx         = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
     pkt.dy         = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     pkt.event_type = type;
-    engine.push_event(pkt);
+    engine.push_mouse(pkt);
 
+    return NULL;
+}
+
+// ── 키보드 이벤트 콜백 ───────────────────────────────────────────────
+
+static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void* userInfo) {
+    if (!g_state.active) return event;
+
+    auto& engine = *static_cast<NetworkEngine*>(userInfo);
+
+    CGKeyCode keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    CGEventFlags flags = CGEventGetFlags(event);
+
+    KeyPacket pkt{};
+    pkt.keycode = keycode;
+    pkt.flags   = static_cast<uint32_t>(flags & 0xFFFFFFFF);
+
+    if (type == kCGEventKeyDown)
+        pkt.event_type = EVENT_KEY_DOWN;
+    else if (type == kCGEventKeyUp)
+        pkt.event_type = EVENT_KEY_UP;
+    else // kCGEventFlagsChanged
+        pkt.event_type = EVENT_FLAGS_CHANGE;
+
+    engine.push_key(pkt);
+
+    // 원격 모드 중 키 입력은 로컬에 전달하지 않음
     return NULL;
 }
 
@@ -217,28 +245,51 @@ int main(int argc, char* argv[]) {
 
     int port = std::stoi(argv[2]);
     NetworkEngine engine(argv[1], port, on_recv);
+    g_engine = &engine;
     engine.start();
 
-    CGEventMask mask = CGEventMaskBit(kCGEventMouseMoved)        |
-                       CGEventMaskBit(kCGEventLeftMouseDragged)  |
-                       CGEventMaskBit(kCGEventRightMouseDragged) |
-                       CGEventMaskBit(kCGEventLeftMouseDown)     |
-                       CGEventMaskBit(kCGEventLeftMouseUp)       |
-                       CGEventMaskBit(kCGEventRightMouseDown)    |
-                       CGEventMaskBit(kCGEventRightMouseUp);
+    // 마우스 이벤트 탭
+    CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)        |
+                             CGEventMaskBit(kCGEventLeftMouseDragged)  |
+                             CGEventMaskBit(kCGEventRightMouseDragged) |
+                             CGEventMaskBit(kCGEventLeftMouseDown)     |
+                             CGEventMaskBit(kCGEventLeftMouseUp)       |
+                             CGEventMaskBit(kCGEventRightMouseDown)    |
+                             CGEventMaskBit(kCGEventRightMouseUp);
 
-    CFMachPortRef tap = CGEventTapCreate(
+    CFMachPortRef mouse_tap = CGEventTapCreate(
         kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
-        mask, mouse_callback, &engine);
+        mouse_mask, mouse_callback, &engine);
 
-    if (!tap) {
+    if (!mouse_tap) {
         std::cerr << "오류: Event Tap 권한 확인 필요 (손쉬운 사용 권한)\n";
         return 1;
     }
 
-    CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), src, kCFRunLoopCommonModes);
-    CGEventTapEnable(tap, true);
+    // 키보드 이벤트 탭
+    CGEventMask key_mask = CGEventMaskBit(kCGEventKeyDown)      |
+                           CGEventMaskBit(kCGEventKeyUp)        |
+                           CGEventMaskBit(kCGEventFlagsChanged);
+
+    CFMachPortRef key_tap = CGEventTapCreate(
+        kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
+        key_mask, keyboard_callback, &engine);
+
+    if (!key_tap) {
+        std::cerr << "오류: 키보드 Event Tap 생성 실패 (손쉬운 사용 권한)\n";
+        CFRelease(mouse_tap);
+        return 1;
+    }
+
+    CFRunLoopRef loop = CFRunLoopGetCurrent();
+
+    CFRunLoopSourceRef mouse_src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, mouse_tap, 0);
+    CFRunLoopAddSource(loop, mouse_src, kCFRunLoopCommonModes);
+    CGEventTapEnable(mouse_tap, true);
+
+    CFRunLoopSourceRef key_src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, key_tap, 0);
+    CFRunLoopAddSource(loop, key_src, kCFRunLoopCommonModes);
+    CGEventTapEnable(key_tap, true);
 
     std::cout << "Host 대기 중... (우측 끝으로 마우스를 이동하면 클라이언트로 전환)\n";
     CFRunLoopRun();
@@ -246,5 +297,10 @@ int main(int argc, char* argv[]) {
     CGAssociateMouseAndMouseCursorPosition(true);
     show_cursor();
     engine.stop();
+
+    CFRelease(key_src);
+    CFRelease(key_tap);
+    CFRelease(mouse_src);
+    CFRelease(mouse_tap);
     return 0;
 }

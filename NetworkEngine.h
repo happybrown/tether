@@ -9,13 +9,37 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <iostream>
+#include <cstring>
+
+// 가변 크기 패킷을 담는 공용 버퍼
+struct RawPacket {
+    uint8_t data[MAX_PACKET_SIZE];
+    uint8_t size;
+
+    static RawPacket from_mouse(const MousePacket& p) {
+        RawPacket r;
+        r.size = sizeof(MousePacket);
+        std::memcpy(r.data, &p, sizeof(MousePacket));
+        return r;
+    }
+
+    static RawPacket from_key(const KeyPacket& p) {
+        RawPacket r;
+        r.size = sizeof(KeyPacket);
+        std::memcpy(r.data, &p, sizeof(KeyPacket));
+        return r;
+    }
+};
 
 class NetworkEngine {
 public:
-    using RecvCallback = std::function<void(const MousePacket&)>;
+    using MouseRecvCallback = std::function<void(const MousePacket&)>;
+    using KeyRecvCallback   = std::function<void(const KeyPacket&)>;
 
-    NetworkEngine(const char* ip, int port, RecvCallback recv_cb = nullptr)
-        : on_recv(recv_cb)
+    NetworkEngine(const char* ip, int port,
+                  MouseRecvCallback mouse_cb = nullptr,
+                  KeyRecvCallback   key_cb   = nullptr)
+        : on_mouse(mouse_cb), on_key(key_cb)
     {
         sock = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock < 0) { std::cerr << "소켓 생성 실패" << std::endl; return; }
@@ -36,7 +60,7 @@ public:
     void start() {
         if (!running.exchange(true)) {
             send_thread = std::thread(&NetworkEngine::send_loop, this);
-            if (on_recv)
+            if (on_mouse || on_key)
                 recv_thread = std::thread(&NetworkEngine::recv_loop, this);
         }
     }
@@ -48,23 +72,28 @@ public:
         }
     }
 
-    void push_event(const MousePacket& packet) { packet_queue.push(packet); }
+    void push_mouse(const MousePacket& p) { packet_queue.push(RawPacket::from_mouse(p)); }
+    void push_key(const KeyPacket& p)     { packet_queue.push(RawPacket::from_key(p)); }
+
+    // 하위 호환: 기존 push_event 유지
+    void push_event(const MousePacket& p) { push_mouse(p); }
 
 private:
     int sock = -1;
     sockaddr_in target_addr{};
-    SPSCQueue<MousePacket, 2048> packet_queue;
+    SPSCQueue<RawPacket, 2048> packet_queue;
     std::thread send_thread;
     std::thread recv_thread;
     std::atomic<bool> running{false};
-    RecvCallback on_recv;
+    MouseRecvCallback on_mouse;
+    KeyRecvCallback   on_key;
 
     void send_loop() {
-        MousePacket packet;
+        RawPacket pkt;
         int idle_count = 0;
         while (running.load(std::memory_order_relaxed)) {
-            if (packet_queue.pop(packet)) {
-                sendto(sock, &packet, sizeof(packet), 0,
+            if (packet_queue.pop(pkt)) {
+                sendto(sock, pkt.data, pkt.size, 0,
                        (sockaddr*)&target_addr, sizeof(target_addr));
                 idle_count = 0;
             } else {
@@ -85,7 +114,6 @@ private:
         int yes = 1;
         setsockopt(rsock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
-        // host는 base_port+100 에서 client의 응답을 수신
         sockaddr_in local{};
         local.sin_family      = AF_INET;
         local.sin_port        = htons(ntohs(target_addr.sin_port) + 100);
@@ -99,12 +127,26 @@ private:
         struct timeval tv{0, 200000};
         setsockopt(rsock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-        MousePacket packet;
+        uint8_t buf[MAX_PACKET_SIZE];
         while (running.load(std::memory_order_relaxed)) {
-            ssize_t n = recvfrom(rsock, &packet, sizeof(packet), 0, nullptr, nullptr);
-            if (n == (ssize_t)sizeof(packet))
-                on_recv(packet);
+            ssize_t n = recvfrom(rsock, buf, sizeof(buf), 0, nullptr, nullptr);
+            if (n < 1) continue;
+
+            dispatch(buf, n);
         }
         close(rsock);
+    }
+
+    void dispatch(const uint8_t* buf, ssize_t n) {
+        uint8_t type = buf[0];
+        if (type == PACKET_MOUSE && n == (ssize_t)sizeof(MousePacket) && on_mouse) {
+            MousePacket p;
+            std::memcpy(&p, buf, sizeof(MousePacket));
+            on_mouse(p);
+        } else if (type == PACKET_KEYBOARD && n == (ssize_t)sizeof(KeyPacket) && on_key) {
+            KeyPacket p;
+            std::memcpy(&p, buf, sizeof(KeyPacket));
+            on_key(p);
+        }
     }
 };

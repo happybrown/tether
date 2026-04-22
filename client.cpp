@@ -108,6 +108,26 @@ static void handle_move(const MousePacket& pkt, const ScreenBounds& screen,
     }
 }
 
+static void handle_key(const KeyPacket& pkt) {
+    if (pkt.event_type == EVENT_FLAGS_CHANGE) {
+        // modifier 키(Shift, Cmd 등)는 NULL 위치로 flags 변경 이벤트 발생
+        CGEventRef ev = CGEventCreate(NULL);
+        CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
+        CGEventRef flags_ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode, false);
+        CGEventSetFlags(flags_ev, (CGEventFlags)pkt.flags);
+        CGEventPost(kCGHIDEventTap, flags_ev);
+        CFRelease(flags_ev);
+        CFRelease(ev);
+        return;
+    }
+
+    bool key_down = (pkt.event_type == EVENT_KEY_DOWN);
+    CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode, key_down);
+    CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
+    CGEventPost(kCGHIDEventTap, ev);
+    CFRelease(ev);
+}
+
 // ── main ─────────────────────────────────────────────────────────────
 
 int main(int argc, char* argv[]) {
@@ -136,40 +156,56 @@ int main(int argc, char* argv[]) {
               << " width=" << (int)screen.width() << " height=" << (int)screen.height() << "\n";
 
     double cur_x = 0.0, cur_y = 0.0;
-    bool pos_init     = false;
+    bool pos_init      = false;
     bool cursor_hidden = false;
 
     sockaddr_in host_addr{};
     bool host_addr_known = false;
 
-    MousePacket packet;
+    uint8_t buf[MAX_PACKET_SIZE];
 
     while (true) {
         sockaddr_in sender{};
         socklen_t sender_len = sizeof(sender);
-        ssize_t n = recvfrom(sock, &packet, sizeof(packet), 0,
+        ssize_t n = recvfrom(sock, buf, sizeof(buf), 0,
                              (sockaddr*)&sender, &sender_len);
-        if (n != (ssize_t)sizeof(MousePacket)) continue;
+        if (n < 1) continue;
 
         if (!host_addr_known) {
-            host_addr           = sender;
-            host_addr.sin_port  = htons(listen_port + 100);
-            host_addr_known     = true;
+            host_addr          = sender;
+            host_addr.sin_port = htons(listen_port + 100);
+            host_addr_known    = true;
             std::cout << "[host 주소 확인됨, reply port=" << listen_port + 100 << "]\n";
         }
 
-        switch (packet.event_type) {
-        case EVENT_SYNC_CURSOR:
-            handle_sync(packet, screen, cur_x, cur_y, pos_init,
-                        cursor_hidden, reply_sock, host_addr);
-            break;
-        case EVENT_SHOW_CURSOR:
-            handle_show(pos_init, cursor_hidden);
-            break;
-        default:
-            if (pos_init)
-                handle_move(packet, screen, cur_x, cur_y);
-            break;
+        uint8_t ptype = buf[0];
+
+        if (ptype == PACKET_KEYBOARD && n == (ssize_t)sizeof(KeyPacket)) {
+            if (pos_init) {
+                KeyPacket pkt;
+                std::memcpy(&pkt, buf, sizeof(KeyPacket));
+                handle_key(pkt);
+            }
+            continue;
+        }
+
+        if (ptype == PACKET_MOUSE && n == (ssize_t)sizeof(MousePacket)) {
+            MousePacket pkt;
+            std::memcpy(&pkt, buf, sizeof(MousePacket));
+
+            switch (pkt.event_type) {
+            case EVENT_SYNC_CURSOR:
+                handle_sync(pkt, screen, cur_x, cur_y, pos_init,
+                            cursor_hidden, reply_sock, host_addr);
+                break;
+            case EVENT_SHOW_CURSOR:
+                handle_show(pos_init, cursor_hidden);
+                break;
+            default:
+                if (pos_init)
+                    handle_move(pkt, screen, cur_x, cur_y);
+                break;
+            }
         }
     }
 
