@@ -116,7 +116,7 @@ static void enter_remote(NetworkEngine& engine, CGPoint loc) {
     MousePacket pkt{};
     pkt.event_type = EVENT_SYNC_CURSOR;
     pkt.dy = static_cast<int16_t>(y_ratio * 32767.0);
-    engine.push_mouse(pkt);
+    engine.send_mouse(pkt);
 }
 
 static void leave_remote(NetworkEngine& engine) {
@@ -127,7 +127,7 @@ static void leave_remote(NetworkEngine& engine) {
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SHOW_CURSOR;
-    engine.push_mouse(pkt);
+    engine.send_mouse(pkt);
 
     CGWarpMouseCursorPosition(CGPointMake(g_layout.right_edge - 50.0, g_remote.entry_y));
     CGAssociateMouseAndMouseCursorPosition(true);
@@ -158,7 +158,6 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
                       type == kCGEventOtherMouseDown  || type == kCGEventOtherMouseUp);
     bool is_scroll = (type == kCGEventScrollWheel);
 
-    // 스크롤은 커서 위치와 무관하므로 warp 생략 (스크롤 중 불필요한 호출 방지)
     if (!is_scroll)
         CGWarpMouseCursorPosition(CGPointMake(g_layout.right_edge, 99999.0));
 
@@ -175,7 +174,6 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     pkt.event_type = type;
 
     if (is_scroll) {
-        // 스크롤 delta (line 단위, field 1/2)를 dx/dy에 담아 전송
         int64_t sdx = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2);
         int64_t sdy = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);
         pkt.dx = static_cast<int16_t>(std::clamp(sdx, -32768LL, 32767LL));
@@ -187,7 +185,7 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     }
 
-    engine.push_mouse(pkt);
+    engine.send_mouse(pkt);
     return NULL;
 }
 
@@ -196,20 +194,20 @@ static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRe
 
     auto& engine = *static_cast<NetworkEngine*>(userInfo);
 
-    CGKeyCode keycode    = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    CGKeyCode    keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags   = CGEventGetFlags(event);
 
     KeyPacket pkt{};
-    pkt.keycode = keycode;
-    pkt.flags   = static_cast<uint32_t>(flags & 0xFFFFFFFF);
-    pkt.event_type = (type == kCGEventKeyDown)    ? EVENT_KEY_DOWN
-                   : (type == kCGEventKeyUp)       ? EVENT_KEY_UP
-                   :                                 EVENT_FLAGS_CHANGE;
-    engine.push_key(pkt);
+    pkt.keycode    = keycode;
+    pkt.flags      = static_cast<uint32_t>(flags & 0xFFFFFFFF);
+    pkt.event_type = (type == kCGEventKeyDown) ? EVENT_KEY_DOWN
+                   : (type == kCGEventKeyUp)   ? EVENT_KEY_UP
+                   :                             EVENT_FLAGS_CHANGE;
+    engine.send_key(pkt);
     return NULL;
 }
 
-static int run_host(const char* client_ip, int port) {
+static int run_host(int port) {
     print_layout();
     refresh_layout();
     std::cout << "[경계] right=" << (int)g_layout.right_edge
@@ -225,19 +223,22 @@ static int run_host(const char* client_ip, int port) {
         }
     };
 
-    NetworkEngine engine(client_ip, port, on_mouse_recv);
+    // host는 server 모드 (ip=nullptr)
+    NetworkEngine engine(nullptr, port, on_mouse_recv);
     engine.start();
 
+    std::cout << "Host 대기 중... (포트 " << port << ", client 접속 대기)\n";
+
     CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)         |
-                             CGEventMaskBit(kCGEventLeftMouseDragged)  |
-                             CGEventMaskBit(kCGEventRightMouseDragged) |
-                             CGEventMaskBit(kCGEventOtherMouseDragged) |
-                             CGEventMaskBit(kCGEventLeftMouseDown)     |
-                             CGEventMaskBit(kCGEventLeftMouseUp)       |
-                             CGEventMaskBit(kCGEventRightMouseDown)    |
-                             CGEventMaskBit(kCGEventRightMouseUp)      |
-                             CGEventMaskBit(kCGEventOtherMouseDown)    |
-                             CGEventMaskBit(kCGEventOtherMouseUp)      |
+                             CGEventMaskBit(kCGEventLeftMouseDragged)   |
+                             CGEventMaskBit(kCGEventRightMouseDragged)  |
+                             CGEventMaskBit(kCGEventOtherMouseDragged)  |
+                             CGEventMaskBit(kCGEventLeftMouseDown)      |
+                             CGEventMaskBit(kCGEventLeftMouseUp)        |
+                             CGEventMaskBit(kCGEventRightMouseDown)     |
+                             CGEventMaskBit(kCGEventRightMouseUp)       |
+                             CGEventMaskBit(kCGEventOtherMouseDown)     |
+                             CGEventMaskBit(kCGEventOtherMouseUp)       |
                              CGEventMaskBit(kCGEventScrollWheel);
 
     CFMachPortRef mouse_tap = CGEventTapCreate(
@@ -248,8 +249,8 @@ static int run_host(const char* client_ip, int port) {
         return 1;
     }
 
-    CGEventMask key_mask = CGEventMaskBit(kCGEventKeyDown)   |
-                           CGEventMaskBit(kCGEventKeyUp)     |
+    CGEventMask key_mask = CGEventMaskBit(kCGEventKeyDown)    |
+                           CGEventMaskBit(kCGEventKeyUp)      |
                            CGEventMaskBit(kCGEventFlagsChanged);
     CFMachPortRef key_tap = CGEventTapCreate(
         kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault,
@@ -270,7 +271,7 @@ static int run_host(const char* client_ip, int port) {
     CFRunLoopAddSource(loop, key_src, kCFRunLoopCommonModes);
     CGEventTapEnable(key_tap, true);
 
-    std::cout << "Host 대기 중... (우측 끝으로 마우스를 이동하면 클라이언트로 전환)\n";
+    std::cout << "우측 끝으로 마우스를 이동하면 클라이언트로 전환\n";
     CFRunLoopRun();
 
     CGAssociateMouseAndMouseCursorPosition(true);
@@ -307,7 +308,7 @@ static ScreenBounds get_screen_bounds() {
 
 static void handle_sync(const MousePacket& pkt, ScreenBounds& screen,
                         double& cur_x, double& cur_y, bool& pos_init,
-                        bool& cursor_hidden, int reply_sock, const sockaddr_in& host_addr)
+                        bool& cursor_hidden, NetworkEngine& engine)
 {
     screen = get_screen_bounds();
 
@@ -324,12 +325,13 @@ static void handle_sync(const MousePacket& pkt, ScreenBounds& screen,
               << " width=" << (int)screen.width()
               << " height=" << (int)screen.height() << "\n";
 
+    // host에 화면 너비 전달
     int32_t w = (int32_t)screen.width();
     MousePacket info{};
     info.event_type = EVENT_CLIENT_INFO;
     info.dx = static_cast<int16_t>(w & 0xFFFF);
     info.dy = static_cast<int16_t>((w >> 16) & 0xFFFF);
-    sendto(reply_sock, &info, sizeof(info), 0, (sockaddr*)&host_addr, sizeof(host_addr));
+    engine.send_mouse(info);
 }
 
 static void handle_show(bool& pos_init, bool& cursor_hidden) {
@@ -394,24 +396,9 @@ static void handle_key(const KeyPacket& pkt) {
     CFRelease(ev);
 }
 
-static int run_client(int listen_port) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { std::cerr << "소켓 생성 실패\n"; return 1; }
-
-    sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(listen_port);
-    addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::cerr << "바인딩 실패\n";
-        close(sock);
-        return 1;
-    }
-
-    int reply_sock = socket(AF_INET, SOCK_DGRAM, 0);
-
+static int run_client(const char* host_ip, int port) {
     ScreenBounds screen = get_screen_bounds();
-    std::cout << "Client 구동 완료. 포트 " << listen_port << " 대기 중...\n"
+    std::cout << "Client 구동. host=" << host_ip << ":" << port << "\n"
               << "[클라이언트 화면]"
               << " left=" << (int)screen.left << " top=" << (int)screen.top
               << " right=" << (int)screen.right << " bottom=" << (int)screen.bottom
@@ -421,57 +408,32 @@ static int run_client(int listen_port) {
     bool pos_init      = false;
     bool cursor_hidden = false;
 
-    sockaddr_in host_addr{};
-    bool host_addr_known = false;
-
-    uint8_t buf[MAX_PACKET_SIZE];
-
-    while (true) {
-        sockaddr_in sender{};
-        socklen_t sender_len = sizeof(sender);
-        ssize_t n = recvfrom(sock, buf, sizeof(buf), 0, (sockaddr*)&sender, &sender_len);
-        if (n < 1) continue;
-
-        if (!host_addr_known) {
-            host_addr          = sender;
-            host_addr.sin_port = htons(listen_port + 100);
-            host_addr_known    = true;
-            std::cout << "[host 주소 확인됨, reply port=" << listen_port + 100 << "]\n";
-        }
-
-        uint8_t ptype = buf[0];
-
-        if (ptype == PACKET_KEYBOARD && n == (ssize_t)sizeof(KeyPacket)) {
-            if (pos_init) {
-                KeyPacket pkt;
-                std::memcpy(&pkt, buf, sizeof(KeyPacket));
-                handle_key(pkt);
-            }
-            continue;
-        }
-
-        if (ptype == PACKET_MOUSE && n == (ssize_t)sizeof(MousePacket)) {
-            MousePacket pkt;
-            std::memcpy(&pkt, buf, sizeof(MousePacket));
-
+    // client는 host ip/port로 connect
+    NetworkEngine engine(host_ip, port,
+        [&](const MousePacket& pkt) {
             switch (pkt.event_type) {
             case EVENT_SYNC_CURSOR:
-                handle_sync(pkt, screen, cur_x, cur_y, pos_init,
-                            cursor_hidden, reply_sock, host_addr);
+                handle_sync(pkt, screen, cur_x, cur_y, pos_init, cursor_hidden, engine);
                 break;
             case EVENT_SHOW_CURSOR:
                 handle_show(pos_init, cursor_hidden);
                 break;
             default:
-                if (pos_init)
-                    handle_move(pkt, screen, cur_x, cur_y);
+                if (pos_init) handle_move(pkt, screen, cur_x, cur_y);
                 break;
             }
+        },
+        [&](const KeyPacket& pkt) {
+            if (pos_init) handle_key(pkt);
         }
-    }
+    );
+    engine.start();
 
-    close(sock);
-    close(reply_sock);
+    // recv 루프는 NetworkEngine 내부에서 돌므로 여기선 대기만
+    std::cout << "host 연결 완료. 대기 중...\n";
+    pause();
+
+    engine.stop();
     return 0;
 }
 
@@ -479,8 +441,8 @@ static int run_client(int listen_port) {
 
 static void print_usage(const char* prog) {
     std::cerr << "사용법:\n"
-              << "  " << prog << " host <client_ip> <port>\n"
-              << "  " << prog << " client [port]        (기본 포트: 9000)\n";
+              << "  " << prog << " host [port]              (기본 포트: 24900)\n"
+              << "  " << prog << " client <host_ip> [port]  (기본 포트: 24900)\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -489,13 +451,14 @@ int main(int argc, char* argv[]) {
     std::string mode = argv[1];
 
     if (mode == "host") {
-        if (argc < 4) { print_usage(argv[0]); return 1; }
-        return run_host(argv[2], std::stoi(argv[3]));
+        int port = (argc >= 3) ? std::stoi(argv[2]) : 24900;
+        return run_host(port);
     }
 
     if (mode == "client") {
-        int port = (argc >= 3) ? std::stoi(argv[2]) : 9000;
-        return run_client(port);
+        if (argc < 3) { print_usage(argv[0]); return 1; }
+        int port = (argc >= 4) ? std::stoi(argv[3]) : 24900;
+        return run_client(argv[2], port);
     }
 
     print_usage(argv[0]);

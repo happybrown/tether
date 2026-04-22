@@ -33,7 +33,6 @@ struct KeyPacket {
 
 #pragma pack(pop)
 
-// 두 패킷 중 큰 쪽에 맞춘 공용 버퍼 크기
 static_assert(sizeof(MousePacket) == 9,  "MousePacket size changed");
 static_assert(sizeof(KeyPacket)   == 11, "KeyPacket size changed");
 static const size_t MAX_PACKET_SIZE = sizeof(KeyPacket);
