@@ -14,6 +14,7 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: settings.mode) { _ in restartIfRunning() }
             }
 
             // ── Host 설정 ──────────────────────────────────────────
@@ -37,6 +38,7 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 240)
+                        .onChange(of: settings.clientEdge) { _ in restartIfRunning() }
                     }
                 }
             }
@@ -48,6 +50,7 @@ struct SettingsView: View {
                         TextField("예: 192.168.0.10", text: $settings.hostIP)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 200)
+                            .onSubmit { restartIfRunning() }
                     }
                 }
             }
@@ -59,6 +62,7 @@ struct SettingsView: View {
                         TextField("24900", value: $settings.port, format: .number)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 80)
+                            .onSubmit { restartIfRunning() }
                         Text("기본값: 24900")
                             .foregroundStyle(.secondary)
                             .font(.caption)
@@ -78,5 +82,11 @@ struct SettingsView: View {
         .padding()
         .frame(width: 480)
         .onAppear { manager.refreshLocalIPs() }
+    }
+
+    private func restartIfRunning() {
+        guard manager.isRunning else { return }
+        manager.stop()
+        manager.start()
     }
 }
