@@ -3,3 +3,7 @@ host_app
 client_app
 bconn
 receiver
+bconn-ui/.build/
+bconn-ui/Sources/BconnCore/LockFreeQueue.h
+bconn-ui/Sources/BconnCore/NetworkEngine.h
+bconn-ui/Sources/BconnCore/protocol.h
