@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:bconn}/bconn-ui",
+            "name": "Debug BconnApp (bconn-ui)",
+            "target": "BconnApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug BconnApp (bconn-ui)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:bconn}/bconn-ui",
+            "name": "Release BconnApp (bconn-ui)",
+            "target": "BconnApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release BconnApp (bconn-ui)"
+        }
+    ]
+}
