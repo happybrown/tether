@@ -70,6 +70,9 @@ targets:
         CLANG_CXX_LANGUAGE_STANDARD: c++17
         CLANG_CXX_LIBRARY: libc++
         SWIFT_OBJC_INTEROP_MODE: objcxx
+        OTHER_LDFLAGS:
+          - -framework ApplicationServices
+          - -framework Cocoa
 
   BconnAppTests:
     type: bundle.unit-test
