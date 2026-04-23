@@ -111,6 +111,11 @@ struct MenuBarView: View {
                 }
                 .keyboardShortcut(",")
 
+                MenuRowButton(icon: "doc.text.magnifyingglass", label: "로그...") {
+                    openWindow(id: "logs")
+                }
+                .keyboardShortcut("l")
+
                 MenuRowButton(icon: "power", label: "종료") {
                     NSApplication.shared.terminate(nil)
                 }

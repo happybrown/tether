@@ -30,8 +30,22 @@ typedef struct {
     char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
 } BconnConfig;
 
+#ifndef BCONN_LOG_LEVEL_DEFINED
+#define BCONN_LOG_LEVEL_DEFINED
+typedef enum {
+    BCONN_LOG_DEBUG = 0,
+    BCONN_LOG_INFO  = 1,
+    BCONN_LOG_ERROR = 2,
+} BconnLogLevel;
+#endif
+
 // 상태 변경 콜백 (Swift → 등록, C++ → 호출)
 typedef void (*BconnStatusCallback)(BconnStatus status, const char* message, void* ctx);
+
+// 로그 콜백 — 레벨, 카테고리, 메시지를 Swift로 전달
+typedef void (*BconnLogCallback)(BconnLogLevel level, const char* category, const char* message, void* ctx);
+
+void bconn_set_log_callback(BconnLogCallback cb, void* ctx);
 
 // 세션 시작/중지
 bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx);

@@ -12,16 +12,19 @@
 		1D53F63E5A336248D87FEB7D /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 179F77E9ED741BCE9CD44214 /* Settings.swift */; };
 		25C9CAC0012FCC2126CDD2DE /* ProtocolTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = 02A5D77134659D29E71E3828 /* ProtocolTests.mm */; };
 		39080AF2A051362AA5DA8627 /* protocol.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = D362DB66E14C7DD8E3162C7C /* protocol.h */; };
+		5ADC9EB3892B3B2C1829B01B /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75861A90FB82B226309DA2C2 /* LogView.swift */; };
 		8A14B11702867F0B43FF3C7A /* NetworkEngine.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = A0A406DBFC60C323BA226859 /* NetworkEngine.h */; };
 		8C726DBBA4D96269E103128D /* NetworkEngineTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = BF6024D1E3DB732CA38D43BA /* NetworkEngineTests.mm */; };
 		AAD837159C3647375E355746 /* BconnManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A0CE605E4F7AC40E87FF9D /* BconnManager.swift */; };
 		B457D514F3ECFED01F5B28A6 /* LockFreeQueue.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 969433EF58270DD1EE417E64 /* LockFreeQueue.h */; };
 		B5C385D0888EBA4C36874498 /* libBconnCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 6B20553A8CA2FE4270CB0B83 /* libBconnCore.a */; };
+		BB9176F596C11079CF15F632 /* BconnLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039953C401AB0767E4CFF66B /* BconnLogger.swift */; };
 		BBBFC54451FAD7305F105A81 /* BconnApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED37FE3465C9F557023608FF /* BconnApp.swift */; };
 		D660AA8D8C396EDD1856C1B2 /* SettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F2D19AD295E310A1108A481 /* SettingsTests.swift */; };
 		DCAD531F473F3DB11D33A788 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33693C7BB1D3F114B12701E /* LaunchAtLogin.swift */; };
 		E11FEF36D4640210BDD67EEF /* libBconnCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 6B20553A8CA2FE4270CB0B83 /* libBconnCore.a */; };
 		E8F1BA5B7069B79C2D4D741A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2575E7BBC51B943A08865978 /* AppDelegate.swift */; };
+		F6451FB54D0428124D8636A5 /* BconnLog.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = 7B0F9F1968CF0002A41C3166 /* BconnLog.h */; };
 		F8A0B4C10752DD0AA3949C3C /* BconnStatus+Swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BFA404F75517DA5276D3BC8 /* BconnStatus+Swift.swift */; };
 		FBE0D10F5276650734342FCE /* bconn_core.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 84EC6500D54676138BE2259E /* bconn_core.cpp */; };
 		FD1EF6C8DCB416EBEB579B56 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B237BFCA45EA78AD9E6E7AB7 /* MenuBarView.swift */; };
@@ -58,6 +61,7 @@
 			dstPath = "include/$(PRODUCT_NAME)";
 			dstSubfolderSpec = 16;
 			files = (
+				F6451FB54D0428124D8636A5 /* BconnLog.h in CopyFiles */,
 				B457D514F3ECFED01F5B28A6 /* LockFreeQueue.h in CopyFiles */,
 				8A14B11702867F0B43FF3C7A /* NetworkEngine.h in CopyFiles */,
 				39080AF2A051362AA5DA8627 /* protocol.h in CopyFiles */,
@@ -68,6 +72,7 @@
 
 /* Begin PBXFileReference section */
 		02A5D77134659D29E71E3828 /* ProtocolTests.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ProtocolTests.mm; sourceTree = "<group>"; };
+		039953C401AB0767E4CFF66B /* BconnLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BconnLogger.swift; sourceTree = "<group>"; };
 		0BFA404F75517DA5276D3BC8 /* BconnStatus+Swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BconnStatus+Swift.swift"; sourceTree = "<group>"; };
 		179356B757C2BF363D6588DA /* BconnAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BconnAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		179F77E9ED741BCE9CD44214 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
@@ -77,6 +82,8 @@
 		5F2D19AD295E310A1108A481 /* SettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTests.swift; sourceTree = "<group>"; };
 		60A0CE605E4F7AC40E87FF9D /* BconnManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BconnManager.swift; sourceTree = "<group>"; };
 		6B20553A8CA2FE4270CB0B83 /* libBconnCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libBconnCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		75861A90FB82B226309DA2C2 /* LogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogView.swift; sourceTree = "<group>"; };
+		7B0F9F1968CF0002A41C3166 /* BconnLog.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BconnLog.h; sourceTree = "<group>"; };
 		84EC6500D54676138BE2259E /* bconn_core.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = bconn_core.cpp; sourceTree = "<group>"; };
 		969433EF58270DD1EE417E64 /* LockFreeQueue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LockFreeQueue.h; sourceTree = "<group>"; };
 		9CA6D10B99C286BF7B2BC6B2 /* BconnCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BconnCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -144,10 +151,12 @@
 				2575E7BBC51B943A08865978 /* AppDelegate.swift */,
 				2AE1725DCE813783AB60A944 /* BconnApp.entitlements */,
 				ED37FE3465C9F557023608FF /* BconnApp.swift */,
+				039953C401AB0767E4CFF66B /* BconnLogger.swift */,
 				60A0CE605E4F7AC40E87FF9D /* BconnManager.swift */,
 				0BFA404F75517DA5276D3BC8 /* BconnStatus+Swift.swift */,
 				502323E9E75487C909C78537 /* Info.plist */,
 				F33693C7BB1D3F114B12701E /* LaunchAtLogin.swift */,
+				75861A90FB82B226309DA2C2 /* LogView.swift */,
 				B237BFCA45EA78AD9E6E7AB7 /* MenuBarView.swift */,
 				179F77E9ED741BCE9CD44214 /* Settings.swift */,
 				EE1F0A420526CB687F86F7DB /* SettingsView.swift */,
@@ -181,6 +190,7 @@
 			isa = PBXGroup;
 			children = (
 				84EC6500D54676138BE2259E /* bconn_core.cpp */,
+				7B0F9F1968CF0002A41C3166 /* BconnLog.h */,
 				969433EF58270DD1EE417E64 /* LockFreeQueue.h */,
 				A0A406DBFC60C323BA226859 /* NetworkEngine.h */,
 				D362DB66E14C7DD8E3162C7C /* protocol.h */,
@@ -335,9 +345,11 @@
 			files = (
 				E8F1BA5B7069B79C2D4D741A /* AppDelegate.swift in Sources */,
 				BBBFC54451FAD7305F105A81 /* BconnApp.swift in Sources */,
+				BB9176F596C11079CF15F632 /* BconnLogger.swift in Sources */,
 				AAD837159C3647375E355746 /* BconnManager.swift in Sources */,
 				F8A0B4C10752DD0AA3949C3C /* BconnStatus+Swift.swift in Sources */,
 				DCAD531F473F3DB11D33A788 /* LaunchAtLogin.swift in Sources */,
+				5ADC9EB3892B3B2C1829B01B /* LogView.swift in Sources */,
 				FD1EF6C8DCB416EBEB579B56 /* MenuBarView.swift in Sources */,
 				1D53F63E5A336248D87FEB7D /* Settings.swift in Sources */,
 				12988083C3A6DA0FE30E830A /* SettingsView.swift in Sources */,

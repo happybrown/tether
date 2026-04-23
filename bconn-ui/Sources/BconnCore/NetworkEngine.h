@@ -1,5 +1,6 @@
 #pragma once
 #include "protocol.h"
+#include "BconnLog.h"
 #include <thread>
 #include <atomic>
 #include <functional>
@@ -9,7 +10,6 @@
 #include <arpa/inet.h>
 #include <netinet/ip.h>
 #include <unistd.h>
-#include <iostream>
 #include <cstring>
 
 // ── 소켓 유틸 ─────────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ public:
           server_mode(ip == nullptr)
     {
         sock = make_udp_sock();
-        if (sock < 0) { std::cerr << "소켓 생성 실패\n"; return; }
+        if (sock < 0) { BCONN_ERROR(CAT_NETWORK, "socket() failed errno=%d", errno); return; }
 
         if (server_mode) {
             // host: 지정 포트에 바인드
@@ -69,7 +69,9 @@ public:
             local.sin_port        = htons(port);
             local.sin_addr.s_addr = INADDR_ANY;
             if (bind(sock, (sockaddr*)&local, sizeof(local)) < 0)
-                std::cerr << "bind 실패\n";
+                BCONN_ERROR(CAT_NETWORK, "bind() failed port=%d errno=%d", port, errno);
+            else
+                BCONN_INFO(CAT_NETWORK, "[host] listening on UDP port %d", port);
         } else {
             // client: host 주소로 connect (이후 send/recv 모두 이 소켓)
             sockaddr_in remote{};
@@ -77,16 +79,15 @@ public:
             remote.sin_port        = htons(port);
             remote.sin_addr.s_addr = inet_addr(ip);
             if (connect(sock, (sockaddr*)&remote, sizeof(remote)) < 0)
-                std::cerr << "connect 실패\n";
+                BCONN_ERROR(CAT_NETWORK, "connect() failed host=%s port=%d errno=%d", ip, port, errno);
+            else
+                BCONN_INFO(CAT_NETWORK, "[client] socket connected to %s:%d", ip, port);
             peer_addr  = remote;
             peer_known = true;
         }
     }
 
-    ~NetworkEngine() {
-        stop();
-        if (sock >= 0) close(sock);
-    }
+    ~NetworkEngine() { stop(); }
 
     void start() {
         if (!running.exchange(true))
@@ -95,8 +96,13 @@ public:
 
     void stop() {
         if (running.exchange(false)) {
-            // 빈 패킷으로 블로킹된 recvfrom 깨우기
-            if (sock >= 0) shutdown(sock, SHUT_RDWR);
+            // 블로킹된 recvfrom을 깨운 뒤 소켓을 닫고 스레드를 join한다.
+            // close 전 shutdown으로 recv를 즉시 unblock한다.
+            if (sock >= 0) {
+                shutdown(sock, SHUT_RDWR);
+                close(sock);
+                sock = -1;
+            }
             if (recv_thread.joinable()) recv_thread.join();
         }
     }
@@ -118,7 +124,7 @@ public:
         peer_known.store(true, std::memory_order_release);
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
-        std::cout << "[auth] client peer set: " << ip_str << "\n";
+        BCONN_INFO(CAT_NETWORK, "[host] peer registered: %s:%d", ip_str, ntohs(addr.sin_port));
     }
 
     // host: AUTH_ACK 전송 (peer 등록 전이므로 sendto 직접 사용)

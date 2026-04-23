@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+if [[ "$1" == "clean" ]]; then
+    echo "클린 중..."
+    rm -rf bin/Bconn.app
+    rm -rf bconn-ui/build
+    rm -rf bconn-ui/BconnApp.xcodeproj
+    echo "클린 완료"
+    exit 0
+fi
+
 mkdir -p bin
 
 echo "빌드 중..."

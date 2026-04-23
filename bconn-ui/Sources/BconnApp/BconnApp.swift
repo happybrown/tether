@@ -13,6 +13,14 @@ struct BconnApp: App {
         .defaultPosition(.center)
         .commandsRemoved()
 
+        // ── 로그 창 ──────────────────────────────────────────────
+        Window("bconn 로그", id: "logs") {
+            LogView()
+        }
+        .windowResizability(.contentMinSize)
+        .defaultPosition(.center)
+        .commandsRemoved()
+
         // ── 메뉴바 ───────────────────────────────────────────────
         MenuBarExtra("bconn", systemImage: "display.2") {
             MenuBarView()
