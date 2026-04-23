@@ -4,8 +4,9 @@ import BconnCore
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 설정이 완료된 상태이면 자동 시작
         let s = AppSettings.shared
+        guard s.autoStart else { return }
+        // 자동 시작 옵션이 켜져 있을 때만 실행
         if s.mode == .host || !s.hostIP.isEmpty {
             BconnManager.shared.start()
         }

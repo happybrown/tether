@@ -44,23 +44,33 @@ class AppSettings: ObservableObject {
     @Published var launchAtLogin: Bool {
         didSet { save() }
     }
+    @Published var autoStart: Bool {
+        didSet { save() }
+    }
+    @Published var psk: String {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
     private init() {
-        mode        = AppMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .host
-        hostIP      = defaults.string(forKey: "hostIP") ?? ""
-        port        = defaults.integer(forKey: "port").nonZero ?? 24900
-        clientEdge  = ClientEdge(rawValue: defaults.integer(forKey: "clientEdge")) ?? .right
+        mode          = AppMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .host
+        hostIP        = defaults.string(forKey: "hostIP") ?? ""
+        port          = defaults.integer(forKey: "port").nonZero ?? 24900
+        clientEdge    = ClientEdge(rawValue: defaults.integer(forKey: "clientEdge")) ?? .right
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
+        autoStart     = defaults.bool(forKey: "autoStart")
+        psk           = defaults.string(forKey: "psk") ?? ""
     }
 
     private func save() {
-        defaults.set(mode.rawValue,      forKey: "mode")
-        defaults.set(hostIP,             forKey: "hostIP")
-        defaults.set(port,               forKey: "port")
+        defaults.set(mode.rawValue,       forKey: "mode")
+        defaults.set(hostIP,              forKey: "hostIP")
+        defaults.set(port,                forKey: "port")
         defaults.set(clientEdge.rawValue, forKey: "clientEdge")
-        defaults.set(launchAtLogin,      forKey: "launchAtLogin")
+        defaults.set(launchAtLogin,       forKey: "launchAtLogin")
+        defaults.set(autoStart,           forKey: "autoStart")
+        defaults.set(psk,                 forKey: "psk")
     }
 }
 

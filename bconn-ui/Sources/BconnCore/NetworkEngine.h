@@ -3,6 +3,7 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -40,21 +41,27 @@ static inline int make_udp_sock() {
 
 class NetworkEngine {
 public:
-    using MouseRecvCallback = std::function<void(const MousePacket&)>;
-    using KeyRecvCallback   = std::function<void(const KeyPacket&)>;
+    using MouseRecvCallback   = std::function<void(const MousePacket&)>;
+    using KeyRecvCallback     = std::function<void(const KeyPacket&)>;
+    using HelloRecvCallback   = std::function<void(const HelloPacket&, const sockaddr_in&)>;
+    using AuthAckRecvCallback = std::function<void(const AuthAckPacket&)>;
 
     // host 모드: ip=nullptr, port=listen port
     // client 모드: ip=host ip, port=host port
     NetworkEngine(const char* ip, int port,
-                  MouseRecvCallback mouse_cb = nullptr,
-                  KeyRecvCallback   key_cb   = nullptr)
-        : on_mouse(mouse_cb), on_key(key_cb), server_mode(ip == nullptr)
+                  MouseRecvCallback   mouse_cb    = nullptr,
+                  KeyRecvCallback     key_cb      = nullptr,
+                  HelloRecvCallback   hello_cb    = nullptr,
+                  AuthAckRecvCallback auth_ack_cb = nullptr)
+        : on_mouse(mouse_cb), on_key(key_cb),
+          on_hello(hello_cb), on_auth_ack(auth_ack_cb),
+          server_mode(ip == nullptr)
     {
         sock = make_udp_sock();
         if (sock < 0) { std::cerr << "소켓 생성 실패\n"; return; }
 
         if (server_mode) {
-            // host: 지정 포트에 바인드, 첫 패킷 수신 후 client 주소 기록
+            // host: 지정 포트에 바인드
             int yes = 1;
             setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
             sockaddr_in local{};
@@ -98,6 +105,31 @@ public:
     void send_mouse(const MousePacket& p) { send_raw(&p, sizeof(p)); }
     void send_key(const KeyPacket& p)     { send_raw(&p, sizeof(p)); }
 
+    // peer_known 무관하게 전송 (HELLO 인증 전 사용)
+    void send_raw_any(const void* data, size_t len) {
+        if (server_mode) return; // host는 peer 없이 보낼 대상 없음
+        send(sock, data, len, 0);
+    }
+
+    // host: HELLO 인증 성공 후 peer 주소 등록
+    void set_peer(const sockaddr_in& addr) {
+        std::lock_guard<std::mutex> lock(peer_mutex);
+        peer_addr = addr;
+        peer_known.store(true, std::memory_order_release);
+        char ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
+        std::cout << "[auth] client peer set: " << ip_str << "\n";
+    }
+
+    // host: AUTH_ACK 전송 (peer 등록 전이므로 sendto 직접 사용)
+    void send_auth_result(bool accepted, const char* host_hostname, const sockaddr_in& to) {
+        AuthAckPacket pkt{};
+        pkt.packet_type = PACKET_AUTH;
+        pkt.accepted    = accepted ? 1 : 0;
+        strncpy(pkt.host_hostname, host_hostname, sizeof(pkt.host_hostname) - 1);
+        sendto(sock, &pkt, sizeof(pkt), 0, (const sockaddr*)&to, sizeof(to));
+    }
+
     // 하위 호환
     void push_mouse(const MousePacket& p) { send_mouse(p); }
     void push_key(const KeyPacket& p)     { send_key(p); }
@@ -107,18 +139,23 @@ private:
     int  sock        = -1;
     bool server_mode = false;
     sockaddr_in peer_addr{};
+    std::mutex  peer_mutex;
     std::atomic<bool> peer_known{false};
     std::thread recv_thread;
     std::atomic<bool> running{false};
-    MouseRecvCallback on_mouse;
-    KeyRecvCallback   on_key;
+    MouseRecvCallback   on_mouse;
+    KeyRecvCallback     on_key;
+    HelloRecvCallback   on_hello;
+    AuthAckRecvCallback on_auth_ack;
 
     void send_raw(const void* data, size_t len) {
         if (!peer_known.load(std::memory_order_acquire)) return;
-        if (server_mode)
+        if (server_mode) {
+            std::lock_guard<std::mutex> lock(peer_mutex);
             sendto(sock, data, len, 0, (sockaddr*)&peer_addr, sizeof(peer_addr));
-        else
+        } else {
             send(sock, data, len, 0);
+        }
     }
 
     void recv_loop() {
@@ -131,22 +168,15 @@ private:
             if (server_mode) {
                 sender_len = sizeof(sender);
                 n = recvfrom(sock, buf, sizeof(buf), 0, (sockaddr*)&sender, &sender_len);
-                if (n > 0 && !peer_known.load(std::memory_order_relaxed)) {
-                    peer_addr  = sender;
-                    peer_known.store(true, std::memory_order_release);
-                    char ip_str[INET_ADDRSTRLEN];
-                    inet_ntop(AF_INET, &sender.sin_addr, ip_str, sizeof(ip_str));
-                    std::cout << "[client 접속: " << ip_str << "]\n";
-                }
             } else {
                 n = recv(sock, buf, sizeof(buf), 0);
             }
 
-            if (n > 0) dispatch(buf, n);
+            if (n > 0) dispatch(buf, n, sender);
         }
     }
 
-    void dispatch(const uint8_t* buf, ssize_t n) {
+    void dispatch(const uint8_t* buf, ssize_t n, const sockaddr_in& sender) {
         uint8_t type = buf[0];
         if (type == PACKET_MOUSE && n == (ssize_t)sizeof(MousePacket) && on_mouse) {
             MousePacket p;
@@ -156,6 +186,14 @@ private:
             KeyPacket p;
             std::memcpy(&p, buf, sizeof(p));
             on_key(p);
+        } else if (type == PACKET_HELLO && n == (ssize_t)sizeof(HelloPacket) && on_hello) {
+            HelloPacket p;
+            std::memcpy(&p, buf, sizeof(p));
+            on_hello(p, sender);
+        } else if (type == PACKET_AUTH && n == (ssize_t)sizeof(AuthAckPacket) && on_auth_ack) {
+            AuthAckPacket p;
+            std::memcpy(&p, buf, sizeof(p));
+            on_auth_ack(p);
         }
     }
 };

@@ -1,14 +1,18 @@
 #include "include/bconn_core.h"
 #include "NetworkEngine.h"
 #include <ApplicationServices/ApplicationServices.h>
+#include <CommonCrypto/CommonHMAC.h>
 #include <objc/objc-runtime.h>
 #include <algorithm>
 #include <atomic>
 #include <vector>
 #include <cstring>
+#include <ctime>
 #include <thread>
+#include <chrono>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include <unistd.h>
 
 // ── 공통 유틸 ────────────────────────────────────────────────────────
 
@@ -34,9 +38,43 @@ static CFMachPortRef       g_key_tap   = nullptr;
 static CFRunLoopRef        g_run_loop  = nullptr;
 static std::thread         g_run_loop_thread;
 
+// 인증 관련 전역
+static char                g_psk[128]      = {};
+static char                g_hostname[32]  = {};
+static std::atomic<bool>   g_auth_ok{false};
+static std::thread         g_heartbeat_thread;
+static std::atomic<bool>   g_heartbeat_running{false};
+
 static void set_status(BconnStatus s, const char* msg = "") {
     g_status.store(s);
     if (g_cb) g_cb(s, msg, g_ctx);
+}
+
+// ── HMAC 인증 ─────────────────────────────────────────────────────────
+
+// HMAC-SHA1(psk, hostname[32] || timestamp_s LE) → 20 bytes
+static void compute_hmac(const char* psk, const char hostname32[32],
+                          int64_t ts, uint8_t out[20]) {
+    uint8_t data[40];
+    memcpy(data,      hostname32, 32);
+    memcpy(data + 32, &ts,        8);  // little-endian (Apple Silicon/Intel 모두 LE)
+    CCHmac(kCCHmacAlgSHA1, psk, strlen(psk), data, sizeof(data), out);
+}
+
+static void send_hello() {
+    HelloPacket pkt{};
+    pkt.packet_type  = PACKET_HELLO;
+    strncpy(pkt.hostname, g_hostname, sizeof(pkt.hostname) - 1);
+    pkt.timestamp_s  = (int64_t)time(nullptr);
+
+    if (strlen(g_psk) > 0) {
+        char hn32[32] = {};
+        memcpy(hn32, pkt.hostname, sizeof(hn32));
+        compute_hmac(g_psk, hn32, pkt.timestamp_s, pkt.hmac);
+    }
+    // psk 없으면 hmac은 zero → host에서 open mode로 수락
+
+    g_engine->send_raw_any(&pkt, sizeof(pkt));
 }
 
 // ── 디스플레이 레이아웃 ──────────────────────────────────────────────
@@ -382,6 +420,23 @@ struct ClientState {
 
 static ClientState g_client;
 
+static void send_client_info() {
+    int32_t w = (int32_t)g_client.screen.width();
+    int32_t h = (int32_t)g_client.screen.height();
+
+    MousePacket info{};
+    info.event_type = EVENT_CLIENT_INFO;
+    info.dx = static_cast<int16_t>(w & 0xFFFF);
+    info.dy = static_cast<int16_t>((w >> 16) & 0xFFFF);
+    g_engine->send_mouse(info);
+
+    MousePacket hinfo{};
+    hinfo.event_type = EVENT_CLIENT_INFO + 1;
+    hinfo.dx = static_cast<int16_t>(h & 0xFFFF);
+    hinfo.dy = static_cast<int16_t>((h >> 16) & 0xFFFF);
+    g_engine->send_mouse(hinfo);
+}
+
 static void client_handle_sync(const MousePacket& pkt) {
     g_client.screen = get_screen_bounds();
 
@@ -413,20 +468,7 @@ static void client_handle_sync(const MousePacket& pkt) {
     if (g_client.cursor_hidden) { show_cursor(); g_client.cursor_hidden = false; }
 
     // host에 화면 크기 전달
-    int32_t w = (int32_t)g_client.screen.width();
-    int32_t h = (int32_t)g_client.screen.height();
-    MousePacket info{};
-    info.event_type = EVENT_CLIENT_INFO;
-    info.dx = static_cast<int16_t>(w & 0xFFFF);
-    info.dy = static_cast<int16_t>((w >> 16) & 0xFFFF);
-    g_engine->send_mouse(info);
-
-    // 높이도 별도 패킷으로 전달
-    MousePacket hinfo{};
-    hinfo.event_type = EVENT_CLIENT_INFO + 1; // EVENT_CLIENT_HEIGHT
-    hinfo.dx = static_cast<int16_t>(h & 0xFFFF);
-    hinfo.dy = static_cast<int16_t>((h >> 16) & 0xFFFF);
-    g_engine->send_mouse(hinfo);
+    send_client_info();
 }
 
 static void client_handle_move(const MousePacket& pkt) {
@@ -478,9 +520,17 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     g_cb  = cb;
     g_ctx = ctx;
 
+    // PSK, 호스트명 초기화
+    strncpy(g_psk, g_cfg.psk, sizeof(g_psk) - 1);
+    g_psk[sizeof(g_psk) - 1] = '\0';
+    gethostname(g_hostname, sizeof(g_hostname));
+    g_hostname[sizeof(g_hostname) - 1] = '\0';
+    g_auth_ok.store(false, std::memory_order_release);
+
     if (g_cfg.is_host) {
         refresh_layout(g_cfg.client_edge);
 
+        // host: CLIENT_INFO는 인증된 peer에게서만 수락
         auto on_mouse = [](const MousePacket& pkt) {
             if (pkt.event_type == EVENT_CLIENT_INFO) {
                 int32_t w = ((int32_t)(uint16_t)pkt.dy << 16) | (uint16_t)pkt.dx;
@@ -491,10 +541,46 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             }
         };
 
-        g_engine = new NetworkEngine(nullptr, g_cfg.port, on_mouse);
+        // host: HELLO 수신 → HMAC 검증 → AUTH_ACK 응답
+        auto on_hello = [](const HelloPacket& pkt, const sockaddr_in& sender) {
+            // 재전송 공격 방지: ±30초 이내만 허용
+            int64_t now = (int64_t)time(nullptr);
+            int64_t diff = pkt.timestamp_s - now;
+            if (diff < -30 || diff > 30) {
+                std::cerr << "[auth] HELLO 거부: timestamp 범위 초과 (diff=" << diff << "s)\n";
+                return;
+            }
+
+            bool accepted = false;
+            if (strlen(g_psk) == 0) {
+                // PSK 없음 → open mode: hostname만 있으면 수락
+                accepted = (pkt.hostname[0] != '\0');
+            } else {
+                char hn32[32] = {};
+                memcpy(hn32, pkt.hostname, sizeof(hn32));
+                uint8_t expected[20];
+                compute_hmac(g_psk, hn32, pkt.timestamp_s, expected);
+                accepted = (memcmp(expected, pkt.hmac, 20) == 0);
+            }
+
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &sender.sin_addr, ip_str, sizeof(ip_str));
+
+            if (accepted) {
+                g_engine->set_peer(sender);
+                std::cout << "[auth] 수락: " << pkt.hostname << " @ " << ip_str << "\n";
+                // message에 클라이언트 호스트명 전달 (Swift UI 표시용)
+                set_status(BCONN_STATUS_CONNECTED, pkt.hostname);
+            } else {
+                std::cerr << "[auth] 거부: " << pkt.hostname << " @ " << ip_str << " (PSK 불일치)\n";
+            }
+
+            g_engine->send_auth_result(accepted, g_hostname, sender);
+        };
+
+        g_engine = new NetworkEngine(nullptr, g_cfg.port, on_mouse, nullptr, on_hello, nullptr);
         g_engine->start();
 
-        // RunLoop은 별도 스레드에서 돌림 (메인 스레드 점유 방지)
         g_run_loop_thread = std::thread([] {
             setup_event_taps();
             if (g_status.load() != BCONN_STATUS_ERROR) {
@@ -508,6 +594,9 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         g_client.screen = get_screen_bounds();
 
         auto on_mouse = [](const MousePacket& pkt) {
+            // 인증 완료 전에는 host 패킷 무시
+            if (!g_auth_ok.load(std::memory_order_acquire)) return;
+
             switch (pkt.event_type) {
             case EVENT_SYNC_CURSOR:
                 client_handle_sync(pkt);
@@ -525,34 +614,64 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         };
 
         auto on_key = [](const KeyPacket& pkt) {
+            if (!g_auth_ok.load(std::memory_order_acquire)) return;
             if (g_client.pos_init) client_handle_key(pkt);
         };
 
-        g_engine = new NetworkEngine(g_cfg.host_ip, g_cfg.port, on_mouse, on_key);
+        // client: AUTH_ACK 수신 처리
+        auto on_auth_ack = [](const AuthAckPacket& pkt) {
+            if (pkt.accepted) {
+                g_auth_ok.store(true, std::memory_order_release);
+                // 인증 성공 후 화면 크기 전달
+                send_client_info();
+                set_status(BCONN_STATUS_CONNECTED, "연결됨");
+                std::cout << "[auth] 인증 성공, host=" << pkt.host_hostname << "\n";
+            } else {
+                g_auth_ok.store(false, std::memory_order_release);
+                set_status(BCONN_STATUS_AUTH_FAILED, "PSK 불일치");
+                std::cerr << "[auth] 인증 실패\n";
+            }
+        };
+
+        g_engine = new NetworkEngine(g_cfg.host_ip, g_cfg.port,
+                                     on_mouse, on_key, nullptr, on_auth_ack);
         g_engine->start();
 
-        // 즉시 host에 화면 크기 전달 (host peer_known 설정)
-        int32_t w = (int32_t)g_client.screen.width();
-        int32_t h = (int32_t)g_client.screen.height();
-        MousePacket info{};
-        info.event_type = EVENT_CLIENT_INFO;
-        info.dx = static_cast<int16_t>(w & 0xFFFF);
-        info.dy = static_cast<int16_t>((w >> 16) & 0xFFFF);
-        g_engine->send_mouse(info);
+        // 최초 HELLO 전송 (인증 요청)
+        send_hello();
+        set_status(BCONN_STATUS_WAITING, "인증 대기 중");
 
-        MousePacket hinfo{};
-        hinfo.event_type = EVENT_CLIENT_INFO + 1;
-        hinfo.dx = static_cast<int16_t>(h & 0xFFFF);
-        hinfo.dy = static_cast<int16_t>((h >> 16) & 0xFFFF);
-        g_engine->send_mouse(hinfo);
+        // heartbeat: 5초마다 HELLO 재전송 (host 재시작 후 자동 재연결)
+        g_heartbeat_running.store(true, std::memory_order_release);
+        g_heartbeat_thread = std::thread([] {
+            while (g_heartbeat_running.load(std::memory_order_acquire)) {
+                for (int i = 0; i < 50 && g_heartbeat_running.load(); ++i)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (!g_heartbeat_running.load(std::memory_order_acquire)) break;
 
-        set_status(BCONN_STATUS_CONNECTED, "연결됨");
+                // 인증 상태 리셋 후 재시도 (host 재시작 감지)
+                if (!g_auth_ok.load(std::memory_order_acquire)) {
+                    set_status(BCONN_STATUS_WAITING, "재연결 중...");
+                }
+                g_auth_ok.store(false, std::memory_order_release);
+                send_hello();
+            }
+        });
     }
 
     return true;
 }
 
 void bconn_stop() {
+    // 콜백을 먼저 해제해 join 중 발생하는 set_status 호출이 Swift로 전달되지 않도록 한다.
+    // (join 대기 중 메인 스레드로 디스패치되면 데드락 위험)
+    g_cb  = nullptr;
+    g_ctx = nullptr;
+
+    // heartbeat 스레드 종료
+    g_heartbeat_running.store(false, std::memory_order_release);
+    if (g_heartbeat_thread.joinable()) g_heartbeat_thread.join();
+
     if (g_run_loop) {
         CFRunLoopStop(g_run_loop);
         g_run_loop = nullptr;
@@ -569,8 +688,9 @@ void bconn_stop() {
 
     CGAssociateMouseAndMouseCursorPosition(true);
     show_cursor();
-    g_remote = {};
-    g_client = {};
+    g_remote  = {};
+    g_client  = {};
+    g_auth_ok.store(false, std::memory_order_release);
     set_status(BCONN_STATUS_IDLE, "중지됨");
 }
 

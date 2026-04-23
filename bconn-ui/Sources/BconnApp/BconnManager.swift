@@ -9,6 +9,8 @@ class BconnManager: ObservableObject {
     @Published var statusMessage: String = "중지됨"
     @Published var localIPs: [String] = []
     @Published var isRunning = false
+    @Published var connectedHostname: String = ""
+    @Published var authFailed: Bool = false
 
     private init() {
         refreshLocalIPs()
@@ -40,6 +42,13 @@ class BconnManager: ObservableObject {
             }
         }
 
+        withUnsafeMutableBytes(of: &config.psk) { ptr in
+            settings.psk.withCString { src in
+                let dest = ptr.baseAddress!.assumingMemoryBound(to: CChar.self)
+                strlcpy(dest, src, 128)
+            }
+        }
+
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         bconn_start(&config, { status, msg, ctx in
             guard let ctx else { return }
@@ -48,6 +57,15 @@ class BconnManager: ObservableObject {
             DispatchQueue.main.async {
                 manager.status = status
                 manager.statusMessage = message
+                if status == BCONN_STATUS_CONNECTED && !message.isEmpty
+                    && message != "연결됨" && message != "재연결 중..." {
+                    // host: message에 클라이언트 호스트명이 담겨 있음
+                    manager.connectedHostname = message
+                    manager.authFailed = false
+                } else if status == BCONN_STATUS_AUTH_FAILED {
+                    manager.authFailed = true
+                    manager.connectedHostname = ""
+                }
                 NotificationCenter.default.post(name: .bconnStatusChanged, object: nil)
             }
         }, selfPtr)
@@ -57,32 +75,40 @@ class BconnManager: ObservableObject {
     }
 
     func stop() {
-        bconn_stop()
         isRunning = false
         status = .idle
         statusMessage = "중지됨"
+        connectedHostname = ""
+        authFailed = false
         NotificationCenter.default.post(name: .bconnStatusChanged, object: nil)
+
+        // bconn_stop()은 내부 스레드(run_loop_thread, heartbeat_thread)를 join하므로
+        // 메인 스레드에서 직접 호출하면 set_status 콜백의 DispatchQueue.main.async와
+        // 데드락이 발생한다. 백그라운드에서 실행한다.
+        Task.detached { bconn_stop() }
     }
 
     var statusLabel: String {
         switch status {
-        case .idle:      return "중지됨"
-        case .waiting:   return "대기 중"
-        case .connected: return "연결됨"
-        case .remote:    return "원격 활성"
-        case .error:     return statusMessage
-        default:         return "알 수 없음"
+        case .idle:        return "중지됨"
+        case .waiting:     return statusMessage.isEmpty ? "대기 중" : statusMessage
+        case .connected:   return "연결됨"
+        case .remote:      return "원격 활성"
+        case .error:       return statusMessage
+        case .authFailed:  return "인증 실패"
+        default:           return "알 수 없음"
         }
     }
 
     var statusColor: Color {
         switch status {
-        case .idle:      return .gray
-        case .waiting:   return .yellow
-        case .connected: return .green
-        case .remote:    return .blue
-        case .error:     return .red
-        default:         return .gray
+        case .idle:        return .gray
+        case .waiting:     return .yellow
+        case .connected:   return .green
+        case .remote:      return .blue
+        case .error:       return .red
+        case .authFailed:  return .orange
+        default:           return .gray
         }
     }
 }

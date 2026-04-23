@@ -14,18 +14,20 @@ typedef enum {
 } BconnEdge;
 
 typedef enum {
-    BCONN_STATUS_IDLE       = 0,
-    BCONN_STATUS_WAITING    = 1, // host: client 대기 중
-    BCONN_STATUS_CONNECTED  = 2, // 연결됨
-    BCONN_STATUS_REMOTE     = 3, // 원격 모드 활성
-    BCONN_STATUS_ERROR      = 4,
+    BCONN_STATUS_IDLE        = 0,
+    BCONN_STATUS_WAITING     = 1, // host: client 대기 중
+    BCONN_STATUS_CONNECTED   = 2, // 연결됨
+    BCONN_STATUS_REMOTE      = 3, // 원격 모드 활성
+    BCONN_STATUS_ERROR       = 4,
+    BCONN_STATUS_AUTH_FAILED = 5, // PSK 불일치
 } BconnStatus;
 
 typedef struct {
-    bool     is_host;
-    char     host_ip[64];  // client 모드: 접속할 host IP
-    uint16_t port;
-    BconnEdge client_edge; // client가 host 기준 어느 방향에 있는지
+    bool      is_host;
+    char      host_ip[64];  // client 모드: 접속할 host IP
+    uint16_t  port;
+    BconnEdge client_edge;  // client가 host 기준 어느 방향에 있는지
+    char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
 } BconnConfig;
 
 // 상태 변경 콜백 (Swift → 등록, C++ → 호출)
