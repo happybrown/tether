@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+#include <CommonCrypto/CommonHMAC.h>
 
 // 이벤트 타입 상수 (kCGEventType 범위와 겹치지 않도록 9900번대 사용)
 static const uint32_t EVENT_SYNC_CURSOR  = 9999; // host→client: 진입 Y 비율 전달
@@ -57,3 +59,13 @@ static_assert(sizeof(KeyPacket)    == 11, "KeyPacket size changed");
 static_assert(sizeof(HelloPacket)  == 64, "HelloPacket size changed");
 static_assert(sizeof(AuthAckPacket) == 34, "AuthAckPacket size changed");
 static const size_t MAX_PACKET_SIZE = sizeof(HelloPacket); // 64 bytes
+
+// HMAC-SHA1(psk, hostname[32] || timestamp_s LE) → 20 bytes
+// bconn_core.cpp 와 테스트 코드가 공유하는 단일 구현
+static inline void compute_hmac(const char* psk, const char hostname32[32],
+                                 int64_t ts, uint8_t out[20]) {
+    uint8_t data[40];
+    memcpy(data,      hostname32, 32);
+    memcpy(data + 32, &ts,        8);
+    CCHmac(kCCHmacAlgSHA1, psk, strlen(psk), data, sizeof(data), out);
+}

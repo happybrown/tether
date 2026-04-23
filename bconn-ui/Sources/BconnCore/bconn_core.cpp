@@ -1,4 +1,5 @@
 #include "include/bconn_core.h"
+#include "protocol.h"
 #include "NetworkEngine.h"
 #include "BconnLog.h"
 #include <ApplicationServices/ApplicationServices.h>
@@ -60,16 +61,7 @@ static void set_status(BconnStatus s, const char* msg = "") {
     if (g_cb) g_cb(s, msg, g_ctx);
 }
 
-// ── HMAC 인증 ─────────────────────────────────────────────────────────
-
-// HMAC-SHA1(psk, hostname[32] || timestamp_s LE) → 20 bytes
-static void compute_hmac(const char* psk, const char hostname32[32],
-                          int64_t ts, uint8_t out[20]) {
-    uint8_t data[40];
-    memcpy(data,      hostname32, 32);
-    memcpy(data + 32, &ts,        8);  // little-endian (Apple Silicon/Intel 모두 LE)
-    CCHmac(kCCHmacAlgSHA1, psk, strlen(psk), data, sizeof(data), out);
-}
+// ── 인증 ──────────────────────────────────────────────────────────────
 
 static void send_hello() {
     HelloPacket pkt{};
@@ -77,14 +69,19 @@ static void send_hello() {
     strncpy(pkt.hostname, g_hostname, sizeof(pkt.hostname) - 1);
     pkt.timestamp_s  = (int64_t)time(nullptr);
 
+    BCONN_DEBUG(CAT_AUTH, "[클라이언트] HELLO 패킷 생성: 호스트명=%s, 타임스탬프=%lld, PSK 사용=%s",
+                pkt.hostname, (long long)pkt.timestamp_s, strlen(g_psk) > 0 ? "예" : "아니오");
+
     if (strlen(g_psk) > 0) {
         char hn32[32] = {};
         memcpy(hn32, pkt.hostname, sizeof(hn32));
         compute_hmac(g_psk, hn32, pkt.timestamp_s, pkt.hmac);
+        BCONN_DEBUG(CAT_AUTH, "[클라이언트] HMAC 계산 완료");
     }
     // psk 없으면 hmac은 zero → host에서 open mode로 수락
 
     g_engine->send_raw_any(&pkt, sizeof(pkt));
+    BCONN_DEBUG(CAT_NETWORK, "[클라이언트] HELLO 패킷 전송됨");
 }
 
 // ── 디스플레이 레이아웃 ──────────────────────────────────────────────
@@ -105,6 +102,8 @@ static void refresh_layout(BconnEdge edge) {
     uint32_t count = 0;
     CGGetActiveDisplayList(16, ids, &count);
 
+    BCONN_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 레이아웃 새로고침: 디스플레이 수=%u, 경계 방향=%d", count, (int)edge);
+
     double min_x = 1e9, max_x = -1e9, min_y = 1e9, max_y = -1e9;
     for (uint32_t i = 0; i < count; ++i) {
         CGRect b = CGDisplayBounds(ids[i]);
@@ -112,6 +111,8 @@ static void refresh_layout(BconnEdge edge) {
         max_x = std::max(max_x, b.origin.x + b.size.width);
         min_y = std::min(min_y, b.origin.y);
         max_y = std::max(max_y, b.origin.y + b.size.height);
+        BCONN_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 %u: 위치=(%.0f, %.0f), 크기=(%.0f x %.0f)",
+                    i, b.origin.x, b.origin.y, b.size.width, b.size.height);
     }
 
     g_layout.left   = min_x;
@@ -119,6 +120,9 @@ static void refresh_layout(BconnEdge edge) {
     g_layout.top    = min_y;
     g_layout.bottom = max_y;
     g_layout.height = max_y - min_y;
+
+    BCONN_DEBUG(CAT_CURSOR, "[호스트] 전체 화면 영역: (%.0f, %.0f) ~ (%.0f, %.0f), 높이=%.0f",
+                g_layout.left, g_layout.top, g_layout.right, g_layout.bottom, g_layout.height);
 
     // 경계 방향에 따라 trigger_edge 및 edge_displays 설정
     g_layout.edge_displays.clear();
@@ -143,8 +147,14 @@ static void refresh_layout(BconnEdge edge) {
             on_edge = (b.origin.y + b.size.height >= max_y - 1.0);
             break;
         }
-        if (on_edge) g_layout.edge_displays.push_back(b);
+        if (on_edge) {
+            g_layout.edge_displays.push_back(b);
+            BCONN_DEBUG(CAT_CURSOR, "[호스트] 에지 디스플레이 추가: %u", i);
+        }
     }
+
+    BCONN_INFO(CAT_CURSOR, "[호스트] 레이아웃 새로고침 완료: 트리거 에지=%.0f, 에지 디스플레이 수=%zu",
+               g_layout.trigger_edge, g_layout.edge_displays.size());
 }
 
 static bool is_at_trigger_edge(CGPoint loc) {
@@ -248,13 +258,15 @@ static void enter_remote(CGPoint loc) {
     g_engine->send_mouse(pkt);
 
     BCONN_INFO(CAT_CURSOR,
-        "[host] enter_remote edge=%d ratio=%.3f loc=(%.0f,%.0f)",
+        "[호스트] 원격 모드 진입 성공: edge=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f)",
         (int)g_cfg.client_edge, ratio, loc.x, loc.y);
 
     set_status(BCONN_STATUS_REMOTE, "원격 모드");
 }
 
 static void leave_remote() {
+    BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)", return_point().x, return_point().y);
+
     g_remote.active       = false;
     g_remote.return_guard = 10;
 
@@ -272,10 +284,16 @@ static void leave_remote() {
 // ── 마우스 콜백 ───────────────────────────────────────────────────────
 
 static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
+    BCONN_DEBUG(CAT_EVENT, "[호스트] 마우스 콜백 호출: 타입=%u, 원격 모드=%d", (unsigned)type, (int)g_remote.active);
+
     if (!g_remote.active) {
         CGPoint loc = CGEventGetLocation(event);
+        BCONN_DEBUG(CAT_EVENT, "[호스트] 로컬 모드: 커서 위치=(%.0f, %.0f), 리턴 가드=%d", loc.x, loc.y, g_remote.return_guard);
         if (g_remote.return_guard > 0) { --g_remote.return_guard; return event; }
-        if (is_at_trigger_edge(loc)) enter_remote(loc);
+        if (is_at_trigger_edge(loc)) {
+            BCONN_DEBUG(CAT_EVENT, "[호스트] 트리거 에지 감지: 위치=(%.0f, %.0f)", loc.x, loc.y);
+            enter_remote(loc);
+        }
         return event;
     }
 
@@ -332,7 +350,7 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     }
     BCONN_DEBUG(CAT_EVENT,
-        "[host] send mouse etype=%u dx=%d dy=%d",
+        "[호스트] 마우스 이벤트 전송: 타입=%u, dx=%d, dy=%d",
         (unsigned)type, (int)pkt.dx, (int)pkt.dy);
     g_engine->send_mouse(pkt);
     return NULL;
@@ -341,10 +359,16 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
 // ── 키보드 콜백 ───────────────────────────────────────────────────────
 
 static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
-    if (!g_remote.active) return event;
+    if (!g_remote.active) {
+        BCONN_DEBUG(CAT_EVENT, "[호스트] 키보드 콜백: 원격 모드 비활성, 이벤트 무시");
+        return event;
+    }
 
     CGKeyCode    keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags   = CGEventGetFlags(event);
+
+    BCONN_DEBUG(CAT_EVENT, "[호스트] 키보드 이벤트 전송: 타입=%u, 키코드=%u, 플래그=0x%X",
+                (unsigned)type, (unsigned)keycode, (unsigned)flags);
 
     KeyPacket pkt{};
     pkt.keycode    = keycode;
@@ -359,6 +383,8 @@ static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRe
 // ── RunLoop 스레드 ────────────────────────────────────────────────────
 
 static void setup_event_taps() {
+    BCONN_DEBUG(CAT_EVENT, "[호스트] 이벤트 탭 설정 시작");
+
     CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)         |
                              CGEventMaskBit(kCGEventLeftMouseDragged)   |
                              CGEventMaskBit(kCGEventRightMouseDragged)  |
@@ -383,9 +409,12 @@ static void setup_event_taps() {
                                  key_mask, keyboard_callback, nullptr);
 
     if (!g_mouse_tap || !g_key_tap) {
+        BCONN_ERROR(CAT_EVENT, "[호스트] 이벤트 탭 생성 실패: 마우스 탭=%p, 키 탭=%p", g_mouse_tap, g_key_tap);
         set_status(BCONN_STATUS_ERROR, "Event Tap 권한 필요 (손쉬운 사용)");
         return;
     }
+
+    BCONN_DEBUG(CAT_EVENT, "[호스트] 이벤트 탭 생성 성공");
 
     g_run_loop = CFRunLoopGetCurrent();
 
@@ -394,9 +423,12 @@ static void setup_event_taps() {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), src, kCFRunLoopCommonModes);
         CGEventTapEnable(tap, true);
         CFRelease(src);
+        BCONN_DEBUG(CAT_EVENT, "[호스트] 이벤트 탭 활성화됨");
     };
     add_tap(g_mouse_tap);
     add_tap(g_key_tap);
+
+    BCONN_INFO(CAT_EVENT, "[호스트] 이벤트 탭 설정 완료");
 }
 
 static void teardown_event_taps() {
@@ -460,23 +492,30 @@ static void client_handle_sync(const MousePacket& pkt) {
     BconnEdge host_edge = (BconnEdge)pkt.dx; // host가 어느 방향 경계에서 넘어왔는지
     double ratio = static_cast<double>(pkt.dy) / 32767.0;
 
+    BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 커서 동기화 시작: 호스트 경계=%d, 비율=%.3f, 화면 크기=(%.0f x %.0f)",
+                (int)host_edge, ratio, g_client.screen.width(), g_client.screen.height());
+
     // host의 진입 방향에 따라 client 커서 진입 위치 결정
     switch (host_edge) {
     case BCONN_EDGE_RIGHT:  // host 우측 → client 좌측 진입
         g_client.cur_x = g_client.screen.left + 2.0;
         g_client.cur_y = g_client.screen.top + ratio * g_client.screen.height();
+        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 우측 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
     case BCONN_EDGE_LEFT:   // host 좌측 → client 우측 진입
         g_client.cur_x = g_client.screen.right - 2.0;
         g_client.cur_y = g_client.screen.top + ratio * g_client.screen.height();
+        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 좌측 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
     case BCONN_EDGE_BOTTOM: // host 아래 → client 위쪽 진입
         g_client.cur_x = g_client.screen.left + ratio * g_client.screen.width();
         g_client.cur_y = g_client.screen.top + 2.0;
+        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 아래쪽 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
     case BCONN_EDGE_TOP:    // host 위 → client 아래쪽 진입
         g_client.cur_x = g_client.screen.left + ratio * g_client.screen.width();
         g_client.cur_y = g_client.screen.bottom - 2.0;
+        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 위쪽 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
     }
 
@@ -485,7 +524,7 @@ static void client_handle_sync(const MousePacket& pkt) {
     if (g_client.cursor_hidden) { show_cursor(); g_client.cursor_hidden = false; }
 
     BCONN_INFO(CAT_CURSOR,
-        "[client] sync host_edge=%d ratio=%.3f warp=(%.0f,%.0f) screen=(%.0f,%.0f,%.0f,%.0f)",
+        "[클라이언트] 커서 동기화 완료: 호스트 경계=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f), 화면영역=(%.0f, %.0f ~ %.0f, %.0f)",
         (int)host_edge, ratio, g_client.cur_x, g_client.cur_y,
         g_client.screen.left, g_client.screen.top,
         g_client.screen.right, g_client.screen.bottom);
@@ -533,7 +572,7 @@ static void client_handle_move(const MousePacket& pkt) {
     CFRelease(ev);
 
     BCONN_DEBUG(CAT_CURSOR,
-        "[client] move etype=%u dx=%d dy=%d pos=(%.0f,%.0f)",
+        "[클라이언트] 커서 이동 이벤트 처리: 타입=%u, dx=%d, dy=%d, 새 좌표=(%.0f, %.0f)",
         (unsigned)etype, (int)pkt.dx, (int)pkt.dy, pos.x, pos.y);
 }
 
@@ -549,7 +588,15 @@ static void client_handle_key(const KeyPacket& pkt) {
 // ── 공개 API ─────────────────────────────────────────────────────────
 
 bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
-    if (g_status.load() != BCONN_STATUS_IDLE) return false;
+    BCONN_INFO(CAT_NETWORK, "bconn_start 호출됨: 모드=%s, 호스트 IP=%s, 포트=%d, 경계 방향=%d, PSK 설정=%s",
+               config->is_host ? "호스트" : "클라이언트",
+               config->host_ip, config->port, (int)config->client_edge,
+               strlen(config->psk) > 0 ? "설정됨" : "없음");
+
+    if (g_status.load() != BCONN_STATUS_IDLE) {
+        BCONN_ERROR(CAT_NETWORK, "bconn_start 실패: 이미 실행 중인 상태 (현재 상태=%d)", (int)g_status.load());
+        return false;
+    }
 
     g_cfg = *config;
     g_cb  = cb;
@@ -562,10 +609,10 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     g_hostname[sizeof(g_hostname) - 1] = '\0';
     g_auth_ok.store(false, std::memory_order_release);
 
-    BCONN_INFO(CAT_NETWORK, "bconn_start mode=%s hostname=%s port=%d psk=%s",
-               g_cfg.is_host ? "host" : "client",
+    BCONN_INFO(CAT_NETWORK, "bconn 시작 요청 처리 완료: 모드=%s, 호스트명=%s, 포트=%d, PSK 설정=%s",
+               g_cfg.is_host ? "호스트" : "클라이언트",
                g_hostname, g_cfg.port,
-               strlen(g_psk) > 0 ? "set" : "none");
+               strlen(g_psk) > 0 ? "설정됨" : "없음");
 
     if (g_cfg.is_host) {
         refresh_layout(g_cfg.client_edge);
@@ -575,11 +622,11 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             if (pkt.event_type == EVENT_CLIENT_INFO) {
                 int32_t w = ((int32_t)(uint16_t)pkt.dy << 16) | (uint16_t)pkt.dx;
                 g_client_width.store(w, std::memory_order_relaxed);
-                BCONN_DEBUG(CAT_NETWORK, "[host] CLIENT_INFO width=%d", w);
+                BCONN_DEBUG(CAT_NETWORK, "[호스트] 클라이언트 정보 수신: 가로 크기=%d", w);
             } else if (pkt.event_type == EVENT_CLIENT_INFO + 1) {
                 int32_t h = ((int32_t)(uint16_t)pkt.dy << 16) | (uint16_t)pkt.dx;
                 g_client_height.store(h, std::memory_order_relaxed);
-                BCONN_DEBUG(CAT_NETWORK, "[host] CLIENT_INFO height=%d", h);
+                BCONN_DEBUG(CAT_NETWORK, "[호스트] 클라이언트 정보 수신: 세로 크기=%d", h);
             }
         };
 
@@ -589,12 +636,12 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             int64_t now = (int64_t)time(nullptr);
             int64_t diff = pkt.timestamp_s - now;
             if (diff < -30 || diff > 30) {
-                BCONN_ERROR(CAT_AUTH, "[host] HELLO rejected: timestamp out of range diff=%llds client=%s",
+                BCONN_ERROR(CAT_AUTH, "[호스트] HELLO 패킷 거부됨: 타임스탬프 허용 범위 초과. 시간차=%lld초, 클라이언트=%s",
                             (long long)diff, pkt.hostname);
                 return;
             }
-            BCONN_INFO(CAT_AUTH, "[host] HELLO received client=%s ts_diff=%llds psk_mode=%s",
-                       pkt.hostname, (long long)diff, strlen(g_psk) > 0 ? "hmac" : "open");
+            BCONN_INFO(CAT_AUTH, "[호스트] HELLO 패킷 수신: 클라이언트=%s, 시간차=%lld초, 인증 방식=%s",
+                       pkt.hostname, (long long)diff, strlen(g_psk) > 0 ? "HMAC" : "Open(인증 없음)");
 
             bool accepted = false;
             if (strlen(g_psk) == 0) {
@@ -613,11 +660,11 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
 
             if (accepted) {
                 g_engine->set_peer(sender);
-                BCONN_INFO(CAT_AUTH, "[host] auth accepted client=%s ip=%s",
+                BCONN_INFO(CAT_AUTH, "[호스트] 인증 성공: 클라이언트=%s, IP=%s",
                            pkt.hostname, ip_str);
                 set_status(BCONN_STATUS_CONNECTED, pkt.hostname);
             } else {
-                BCONN_ERROR(CAT_AUTH, "[host] auth rejected client=%s ip=%s (PSK mismatch)",
+                BCONN_ERROR(CAT_AUTH, "[호스트] 인증 실패: 클라이언트=%s, IP=%s (PSK 불일치)",
                             pkt.hostname, ip_str);
             }
 
@@ -643,21 +690,25 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             // 인증 완료 전에는 host 패킷 무시
             if (!g_auth_ok.load(std::memory_order_acquire)) {
                 BCONN_DEBUG(CAT_NETWORK,
-                    "[client] packet dropped (not authenticated) etype=%u", pkt.event_type);
+                    "[클라이언트] 패킷 무시됨 (인증 전 상태): 타입=%u", pkt.event_type);
                 return;
             }
 
             BCONN_DEBUG(CAT_EVENT,
-                "[client] recv mouse etype=%u dx=%d dy=%d pos_init=%d",
+                "[클라이언트] 마우스 패킷 수신: 타입=%u, dx=%d, dy=%d, 위치 초기화 상태=%d",
                 pkt.event_type, (int)pkt.dx, (int)pkt.dy, (int)g_client.pos_init);
 
             switch (pkt.event_type) {
             case EVENT_SYNC_CURSOR:
+                BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 커서 동기화 요청 (호스트가 진입함): 화면영역=(%.0f, %.0f ~ %.0f, %.0f)",
+                           g_client.screen.left, g_client.screen.top,
+                           g_client.screen.right, g_client.screen.bottom);
+                BCONN_INFO(CAT_CURSOR, "원격 모드 전환");
                 client_handle_sync(pkt);
                 set_status(BCONN_STATUS_REMOTE, "원격 모드");
                 break;
             case EVENT_SHOW_CURSOR:
-                BCONN_INFO(CAT_CURSOR, "[client] show cursor (host returned)");
+                BCONN_INFO(CAT_CURSOR, "[클라이언트] 커서 표시 (호스트가 자신의 화면으로 복귀함)");
                 if (!g_client.cursor_hidden) { hide_cursor(); g_client.cursor_hidden = true; }
                 g_client.pos_init = false;
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");
@@ -667,7 +718,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                     client_handle_move(pkt);
                 } else {
                     BCONN_DEBUG(CAT_CURSOR,
-                        "[client] move dropped (pos_init=false) etype=%u", pkt.event_type);
+                        "[클라이언트] 커서 이동 무시됨 (위치 초기화 안됨): 타입=%u", pkt.event_type);
                 }
                 break;
             }
@@ -684,11 +735,11 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 g_auth_ok.store(true, std::memory_order_release);
                 send_client_info();
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");
-                BCONN_INFO(CAT_AUTH, "[client] auth accepted host=%s", pkt.host_hostname);
+                BCONN_INFO(CAT_AUTH, "[클라이언트] 인증 성공 (호스트 수락): 호스트=%s", pkt.host_hostname);
             } else {
                 g_auth_ok.store(false, std::memory_order_release);
                 set_status(BCONN_STATUS_AUTH_FAILED, "PSK 불일치");
-                BCONN_ERROR(CAT_AUTH, "[client] auth rejected by host");
+                BCONN_ERROR(CAT_AUTH, "[클라이언트] 인증 실패 (호스트가 거부함)");
             }
         };
 
@@ -697,7 +748,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         g_engine->start();
 
         // 최초 HELLO 전송 (인증 요청)
-        BCONN_INFO(CAT_AUTH, "[client] sending HELLO to %s:%d", g_cfg.host_ip, g_cfg.port);
+        BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 패킷 전송 중... 목적지=%s:%d", g_cfg.host_ip, g_cfg.port);
         send_hello();
         set_status(BCONN_STATUS_WAITING, "인증 대기 중");
 
@@ -713,21 +764,22 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 g_auth_ok.store(false, std::memory_order_release);
                 if (was_auth) {
                     // 직전 인증 상태였으면 재연결 시도 로그
-                    BCONN_INFO(CAT_AUTH, "[client] heartbeat: re-authenticating");
+                    BCONN_INFO(CAT_AUTH, "[클라이언트] 하트비트: 재인증 시도 중...");
                     set_status(BCONN_STATUS_WAITING, "재연결 중...");
                 } else {
-                    BCONN_DEBUG(CAT_AUTH, "[client] heartbeat: retrying HELLO");
+                    BCONN_DEBUG(CAT_AUTH, "[클라이언트] 하트비트: HELLO 패킷 재전송");
                 }
                 send_hello();
             }
         });
     }
 
+    BCONN_INFO(CAT_NETWORK, "bconn_start 완료: 엔진 시작됨, 상태=%s", g_cfg.is_host ? "호스트 대기 중" : "클라이언트 연결 시도 중");
     return true;
 }
 
 void bconn_stop() {
-    BCONN_INFO(CAT_NETWORK, "bconn_stop called");
+    BCONN_INFO(CAT_NETWORK, "bconn_stop 호출됨: 연결 종료 처리 시작");
 
     // 콜백을 먼저 해제해 join 중 발생하는 set_status 호출이 Swift로 전달되지 않도록 한다.
     // (join 대기 중 메인 스레드로 디스패치되면 데드락 위험)
@@ -757,6 +809,8 @@ void bconn_stop() {
     g_client  = {};
     g_auth_ok.store(false, std::memory_order_release);
     set_status(BCONN_STATUS_IDLE, "중지됨");
+
+    BCONN_INFO(CAT_NETWORK, "bconn_stop 완료: 모든 리소스 정리됨");
 }
 
 BconnStatus bconn_get_status() {

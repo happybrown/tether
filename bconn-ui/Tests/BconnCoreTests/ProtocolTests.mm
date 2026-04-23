@@ -72,15 +72,6 @@
 
 // ── HMAC 인증 테스트 ──────────────────────────────────────────────────
 
-// bconn_core.cpp 내부 함수와 동일한 로직을 여기서 재현해 테스트
-static void compute_hmac_test(const char* psk, const char hostname32[32],
-                               int64_t ts, uint8_t out[20]) {
-    uint8_t data[40];
-    memcpy(data,      hostname32, 32);
-    memcpy(data + 32, &ts,        8);
-    CCHmac(kCCHmacAlgSHA1, psk, strlen(psk), data, sizeof(data), out);
-}
-
 @interface AuthHmacTests : XCTestCase
 @end
 
@@ -92,8 +83,8 @@ static void compute_hmac_test(const char* psk, const char hostname32[32],
     int64_t ts = 1700000000LL;
 
     uint8_t out1[20], out2[20];
-    compute_hmac_test("mysecret", hn, ts, out1);
-    compute_hmac_test("mysecret", hn, ts, out2);
+    compute_hmac("mysecret", hn, ts, out1);
+    compute_hmac("mysecret", hn, ts, out2);
 
     XCTAssertEqual(memcmp(out1, out2, 20), 0);
 }
@@ -104,8 +95,8 @@ static void compute_hmac_test(const char* psk, const char hostname32[32],
     int64_t ts = 1700000000LL;
 
     uint8_t out1[20], out2[20];
-    compute_hmac_test("correctpsk", hn, ts, out1);
-    compute_hmac_test("wrongpsk",   hn, ts, out2);
+    compute_hmac("correctpsk", hn, ts, out1);
+    compute_hmac("wrongpsk",   hn, ts, out2);
 
     XCTAssertNotEqual(memcmp(out1, out2, 20), 0);
 }
@@ -117,8 +108,8 @@ static void compute_hmac_test(const char* psk, const char hostname32[32],
     int64_t ts = 1700000000LL;
 
     uint8_t out1[20], out2[20];
-    compute_hmac_test("psk", hn1, ts, out1);
-    compute_hmac_test("psk", hn2, ts, out2);
+    compute_hmac("psk", hn1, ts, out1);
+    compute_hmac("psk", hn2, ts, out2);
 
     XCTAssertNotEqual(memcmp(out1, out2, 20), 0);
 }
@@ -128,8 +119,8 @@ static void compute_hmac_test(const char* psk, const char hostname32[32],
     strncpy(hn, "MacBookPro.local", 31);
 
     uint8_t out1[20], out2[20];
-    compute_hmac_test("psk", hn, 1700000000LL, out1);
-    compute_hmac_test("psk", hn, 1700000001LL, out2);
+    compute_hmac("psk", hn, 1700000000LL, out1);
+    compute_hmac("psk", hn, 1700000001LL, out2);
 
     XCTAssertNotEqual(memcmp(out1, out2, 20), 0);
 }
@@ -146,16 +137,16 @@ static void compute_hmac_test(const char* psk, const char hostname32[32],
     const char* psk = "shared_secret";
 
     uint8_t computed[20];
-    compute_hmac_test(psk, hn, ts, computed);
+    compute_hmac(psk, hn, ts, computed);
 
     // 올바른 PSK로 검증 → 통과
     uint8_t expected_ok[20];
-    compute_hmac_test(psk, hn, ts, expected_ok);
+    compute_hmac(psk, hn, ts, expected_ok);
     XCTAssertEqual(memcmp(computed, expected_ok, 20), 0, @"올바른 PSK 검증 실패");
 
     // 틀린 PSK로 검증 → 실패
     uint8_t expected_fail[20];
-    compute_hmac_test("wrong_secret", hn, ts, expected_fail);
+    compute_hmac("wrong_secret", hn, ts, expected_fail);
     XCTAssertNotEqual(memcmp(computed, expected_fail, 20), 0, @"잘못된 PSK가 통과됨");
 }
 
