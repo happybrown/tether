@@ -23,6 +23,21 @@ extern void*      g_log_ctx;
 }
 #endif
 
+// os_log_t 객체는 생성 비용이 있으므로 카테고리별로 한 번만 만들어 재사용한다.
+static inline os_log_t bconn_log_for_cat(const char* cat) {
+    // 카테고리 상수는 4개로 고정 — 선형 탐색으로 충분
+    static os_log_t logs[4] = {};
+    static const char* keys[4] = { "auth", "network", "cursor", "event" };
+    for (int i = 0; i < 4; ++i) {
+        if (keys[i] == cat) {  // 포인터 동일성 비교 (매크로 리터럴이므로 항상 성립)
+            if (!logs[i]) logs[i] = os_log_create(BCONN_LOG_SUBSYSTEM, cat);
+            return logs[i];
+        }
+    }
+    // 알 수 없는 카테고리는 매번 생성 (드문 경우)
+    return os_log_create(BCONN_LOG_SUBSYSTEM, cat);
+}
+
 static inline void bconn_log_emit(BconnLogLevel level, const char* cat,
                                    const char* fmt, ...) {
     char buf[512];
@@ -31,7 +46,7 @@ static inline void bconn_log_emit(BconnLogLevel level, const char* cat,
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    os_log_t log = os_log_create(BCONN_LOG_SUBSYSTEM, cat);
+    os_log_t log = bconn_log_for_cat(cat);
     switch (level) {
     case BCONN_LOG_DEBUG: os_log_debug(log, "%{public}s", buf); break;
     case BCONN_LOG_INFO:  os_log_info (log, "%{public}s", buf); break;
@@ -41,7 +56,13 @@ static inline void bconn_log_emit(BconnLogLevel level, const char* cat,
     if (g_log_cb) g_log_cb(level, cat, buf, g_log_ctx);
 }
 
+// DEBUG 빌드에서만 BCONN_DEBUG 활성화 — Release에서는 완전히 제거된다
+#ifdef DEBUG
 #define BCONN_DEBUG(cat, fmt, ...) bconn_log_emit(BCONN_LOG_DEBUG, cat, fmt, ##__VA_ARGS__)
+#else
+#define BCONN_DEBUG(cat, fmt, ...) ((void)0)
+#endif
+
 #define BCONN_INFO(cat, fmt, ...)  bconn_log_emit(BCONN_LOG_INFO,  cat, fmt, ##__VA_ARGS__)
 #define BCONN_ERROR(cat, fmt, ...) bconn_log_emit(BCONN_LOG_ERROR, cat, fmt, ##__VA_ARGS__)
 

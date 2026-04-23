@@ -178,7 +178,12 @@ private:
                 n = recv(sock, buf, sizeof(buf), 0);
             }
 
-            if (n > 0) dispatch(buf, n, sender);
+            if (n > 0) {
+                dispatch(buf, n, sender);
+            } else if (n < 0 && errno != EINTR) {
+                // 소켓이 닫혔거나 복구 불가능한 에러 — spin 방지
+                break;
+            }
         }
     }
 

@@ -284,16 +284,10 @@ static void leave_remote() {
 // ── 마우스 콜백 ───────────────────────────────────────────────────────
 
 static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
-    BCONN_DEBUG(CAT_EVENT, "[호스트] 마우스 콜백 호출: 타입=%u, 원격 모드=%d", (unsigned)type, (int)g_remote.active);
-
     if (!g_remote.active) {
         CGPoint loc = CGEventGetLocation(event);
-        BCONN_DEBUG(CAT_EVENT, "[호스트] 로컬 모드: 커서 위치=(%.0f, %.0f), 리턴 가드=%d", loc.x, loc.y, g_remote.return_guard);
         if (g_remote.return_guard > 0) { --g_remote.return_guard; return event; }
-        if (is_at_trigger_edge(loc)) {
-            BCONN_DEBUG(CAT_EVENT, "[호스트] 트리거 에지 감지: 위치=(%.0f, %.0f)", loc.x, loc.y);
-            enter_remote(loc);
-        }
+        if (is_at_trigger_edge(loc)) enter_remote(loc);
         return event;
     }
 
@@ -349,9 +343,6 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         pkt.dx = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
         pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     }
-    BCONN_DEBUG(CAT_EVENT,
-        "[호스트] 마우스 이벤트 전송: 타입=%u, dx=%d, dy=%d",
-        (unsigned)type, (int)pkt.dx, (int)pkt.dy);
     g_engine->send_mouse(pkt);
     return NULL;
 }
@@ -359,16 +350,10 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
 // ── 키보드 콜백 ───────────────────────────────────────────────────────
 
 static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
-    if (!g_remote.active) {
-        BCONN_DEBUG(CAT_EVENT, "[호스트] 키보드 콜백: 원격 모드 비활성, 이벤트 무시");
-        return event;
-    }
+    if (!g_remote.active) return event;
 
     CGKeyCode    keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags   = CGEventGetFlags(event);
-
-    BCONN_DEBUG(CAT_EVENT, "[호스트] 키보드 이벤트 전송: 타입=%u, 키코드=%u, 플래그=0x%X",
-                (unsigned)type, (unsigned)keycode, (unsigned)flags);
 
     KeyPacket pkt{};
     pkt.keycode    = keycode;
@@ -492,30 +477,23 @@ static void client_handle_sync(const MousePacket& pkt) {
     BconnEdge host_edge = (BconnEdge)pkt.dx; // host가 어느 방향 경계에서 넘어왔는지
     double ratio = static_cast<double>(pkt.dy) / 32767.0;
 
-    BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 커서 동기화 시작: 호스트 경계=%d, 비율=%.3f, 화면 크기=(%.0f x %.0f)",
-                (int)host_edge, ratio, g_client.screen.width(), g_client.screen.height());
-
     // host의 진입 방향에 따라 client 커서 진입 위치 결정
     switch (host_edge) {
-    case BCONN_EDGE_RIGHT:  // host 우측 → client 좌측 진입
+    case BCONN_EDGE_RIGHT:
         g_client.cur_x = g_client.screen.left + 2.0;
         g_client.cur_y = g_client.screen.top + ratio * g_client.screen.height();
-        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 우측 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
-    case BCONN_EDGE_LEFT:   // host 좌측 → client 우측 진입
+    case BCONN_EDGE_LEFT:
         g_client.cur_x = g_client.screen.right - 2.0;
         g_client.cur_y = g_client.screen.top + ratio * g_client.screen.height();
-        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 좌측 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
-    case BCONN_EDGE_BOTTOM: // host 아래 → client 위쪽 진입
+    case BCONN_EDGE_BOTTOM:
         g_client.cur_x = g_client.screen.left + ratio * g_client.screen.width();
         g_client.cur_y = g_client.screen.top + 2.0;
-        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 아래쪽 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
-    case BCONN_EDGE_TOP:    // host 위 → client 아래쪽 진입
+    case BCONN_EDGE_TOP:
         g_client.cur_x = g_client.screen.left + ratio * g_client.screen.width();
         g_client.cur_y = g_client.screen.bottom - 2.0;
-        BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 위쪽 경계 진입: x=%.0f, y=%.0f", g_client.cur_x, g_client.cur_y);
         break;
     }
 
@@ -571,9 +549,6 @@ static void client_handle_move(const MousePacket& pkt) {
     CGEventPost(kCGHIDEventTap, ev);
     CFRelease(ev);
 
-    BCONN_DEBUG(CAT_CURSOR,
-        "[클라이언트] 커서 이동 이벤트 처리: 타입=%u, dx=%d, dy=%d, 새 좌표=(%.0f, %.0f)",
-        (unsigned)etype, (int)pkt.dx, (int)pkt.dy, pos.x, pos.y);
 }
 
 static void client_handle_key(const KeyPacket& pkt) {
