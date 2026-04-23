@@ -12,38 +12,24 @@ fi
 
 mkdir -p bin
 
-echo "빌드 중..."
+ARCH=$(uname -m)
+echo "빌드 중... (아키텍처: $ARCH)"
+
 (cd bconn-ui && xcodegen generate --quiet && \
   xcodebuild -project BconnApp.xcodeproj \
              -scheme BconnApp \
              -configuration Release \
-             -derivedDataPath build/arm64 \
-             -arch arm64 \
-             -quiet 2>&1 && \
-  xcodebuild -project BconnApp.xcodeproj \
-             -scheme BconnApp \
-             -configuration Release \
-             -derivedDataPath build/x86_64 \
-             -arch x86_64 \
+             -derivedDataPath build \
+             -arch "$ARCH" \
              -quiet 2>&1)
 
-# 두 아키텍처를 lipo로 합쳐 Universal Binary 생성
-ARM_APP=bconn-ui/build/arm64/Build/Products/Release/Bconn.app
-X86_APP=bconn-ui/build/x86_64/Build/Products/Release/Bconn.app
-
 rm -rf bin/Bconn.app
-cp -R "$ARM_APP" bin/Bconn.app
-
-lipo -create \
-     "$ARM_APP/Contents/MacOS/Bconn" \
-     "$X86_APP/Contents/MacOS/Bconn" \
-     -output bin/Bconn.app/Contents/MacOS/Bconn
+cp -R "bconn-ui/build/Build/Products/Release/Bconn.app" bin/Bconn.app
 
 # quarantine 속성 제거 후 재서명 — Gatekeeper가 adhoc 서명 앱을 거부하는 것을 방지
 xattr -cr bin/Bconn.app
 codesign --force --deep --sign - bin/Bconn.app
 
 echo "-----------------------------------"
-echo "빌드 성공! (Universal Binary: arm64 + x86_64)"
-echo "확인: lipo -info bin/Bconn.app/Contents/MacOS/Bconn"
+echo "빌드 성공! ($ARCH)"
 echo "실행: open bin/Bconn.app"
