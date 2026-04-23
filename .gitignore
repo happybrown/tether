@@ -1,6 +1,3 @@
 bin/
-host_app
-client_app
-bconn
-receiver
 bconn-ui/.build/
+bconn-ui/build/

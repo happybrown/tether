@@ -1,0 +1,87 @@
+name: BconnApp
+options:
+  bundleIdPrefix: com.bconn
+  deploymentTarget:
+    macOS: "13.0"
+  defaultConfig: Release
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+targets:
+  BconnCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/BconnCore
+        excludes:
+          - include
+    settings:
+      base:
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include $(SRCROOT)/Sources/BconnCore
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        GCC_OPTIMIZATION_LEVEL: "3"
+        DEFINES_MODULE: YES
+        OTHER_LDFLAGS:
+          - -framework ApplicationServices
+          - -framework Cocoa
+          - -lpthread
+
+  BconnApp:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/BconnApp
+    dependencies:
+      - target: BconnCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bconn.app
+        PRODUCT_NAME: Bconn
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include
+        SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
+        OTHER_LDFLAGS:
+          - -framework ServiceManagement
+        INFOPLIST_FILE: Sources/BconnApp/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        # 메뉴바 전용 앱 — Dock 아이콘 없음
+        LSUIElement: YES
+    entitlements:
+      path: Sources/BconnApp/BconnApp.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+
+  BconnCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/BconnCoreTests
+    dependencies:
+      - target: BconnCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include $(SRCROOT)/Sources/BconnCore
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+
+  BconnAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/BconnAppTests
+    dependencies:
+      - target: BconnCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.bconn.apptests
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include
+        SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
+        SWIFT_OBJC_INTEROP_MODE: objcxx
