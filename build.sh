@@ -39,6 +39,10 @@ lipo -create \
      "$X86_APP/Contents/MacOS/Bconn" \
      -output bin/Bconn.app/Contents/MacOS/Bconn
 
+# quarantine 속성 제거 후 재서명 — Gatekeeper가 adhoc 서명 앱을 거부하는 것을 방지
+xattr -cr bin/Bconn.app
+codesign --force --deep --sign - bin/Bconn.app
+
 echo "-----------------------------------"
 echo "빌드 성공! (Universal Binary: arm64 + x86_64)"
 echo "확인: lipo -info bin/Bconn.app/Contents/MacOS/Bconn"
