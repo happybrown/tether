@@ -30,6 +30,9 @@ cp -R "bconn-ui/build/Build/Products/Release/Bconn.app" bin/Bconn.app
 xattr -cr bin/Bconn.app
 codesign --force --deep --sign - bin/Bconn.app
 
+# TCC 권한 초기화 — 재빌드 시 이전 권한 캐시가 남아 Event Tap 등이 오작동하는 것을 방지
+tccutil reset All com.bconn.app
+
 echo "-----------------------------------"
 echo "빌드 성공! ($ARCH)"
 echo "실행: open bin/Bconn.app"
