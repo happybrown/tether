@@ -128,11 +128,19 @@ void client_handle_move(const MousePacket& pkt) {
              etype == kCGEventOtherMouseDragged)
         btn = kCGMouseButtonCenter;
 
+    bool is_click = (etype == kCGEventLeftMouseDown  || etype == kCGEventLeftMouseUp  ||
+                     etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
+                     etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
+
     CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
     CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, pkt.dx);
     CGEventSetIntegerValueField(ev, kCGMouseEventDeltaY, pkt.dy);
     CGEventPost(kCGHIDEventTap, ev);
     CFRelease(ev);
+
+    if (is_click) {
+        BCONN_DEBUG(CAT_EVENT, "[클라이언트] 클릭 주입: type=%u pos=(%.0f,%.0f)", (unsigned)etype, pos.x, pos.y);
+    }
 }
 
 void client_handle_key(const KeyPacket& pkt) {

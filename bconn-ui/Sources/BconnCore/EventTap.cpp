@@ -244,6 +244,10 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     if (!is_scroll)
         CGWarpMouseCursorPosition(offscreen_point());
 
+    if (is_click) {
+        BCONN_DEBUG(CAT_EVENT, "[호스트] 클릭 전송: type=%u entry_guard=%d", (unsigned)type, g_remote.entry_guard);
+    }
+
     if (!is_click && !is_scroll) {
         if (g_remote.entry_guard > 0) { --g_remote.entry_guard; return NULL; }
 
@@ -282,12 +286,16 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         int64_t sdy = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);
         pkt.dx = static_cast<int16_t>(std::clamp(sdx, -32768LL, 32767LL));
         pkt.dy = static_cast<int16_t>(std::clamp(sdy, -32768LL, 32767LL));
-    } else {
+    } else if (!is_click) {
+        // 이동/드래그만 delta를 읽는다.
+        // 클릭 이벤트의 kCGMouseEventDeltaX/Y는 무의미한 값이 들어올 수 있어
+        // 클라이언트의 커서 누적 위치를 오염시킨다.
         int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
         int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
         pkt.dx = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
         pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
     }
+    // is_click 시 dx/dy는 0 (zero-initialized) — 클라이언트는 현재 커서 위치에 클릭 주입
     g_engine->send_mouse(pkt);
     return NULL;
 }
