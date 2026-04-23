@@ -14,11 +14,6 @@ extern ClientState    g_client;
 
 // ── 커서 유틸 ─────────────────────────────────────────────────────────
 
-static void hide_cursor() {
-    id cls = (id)objc_getClass("NSCursor");
-    ((void(*)(id,SEL))objc_msgSend)(cls, sel_registerName("hide"));
-}
-
 static void show_cursor() {
     id cls = (id)objc_getClass("NSCursor");
     ((void(*)(id,SEL))objc_msgSend)(cls, sel_registerName("unhide"));

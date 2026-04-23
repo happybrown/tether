@@ -150,7 +150,7 @@ final class LocalIPsTests: XCTestCase {
 
         let raw = String(cString: buf)
         let ips = raw.split(separator: "\n").map(String.init)
-        XCTAssertEqual(ips.count, count, "IP 개수와 줄 수가 일치해야 함")
+        XCTAssertEqual(ips.count, Int(count), "IP 개수와 줄 수가 일치해야 함")
     }
 
     func test_getLocalIps_noLoopback() {
