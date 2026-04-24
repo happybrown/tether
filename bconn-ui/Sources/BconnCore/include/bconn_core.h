@@ -28,6 +28,7 @@ typedef struct {
     uint16_t  port;
     BconnEdge client_edge;  // client가 host 기준 어느 방향에 있는지
     char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
+    uint16_t  reconnect_interval_s; // client: PING/HELLO 재전송 간격(초), 0이면 기본값(5초)
 } BconnConfig;
 
 #ifndef BCONN_LOG_LEVEL_DEFINED

@@ -17,6 +17,8 @@ static const uint8_t PACKET_MOUSE    = 0;
 static const uint8_t PACKET_KEYBOARD = 1;
 static const uint8_t PACKET_HELLO    = 2; // client → host: 인증 요청
 static const uint8_t PACKET_AUTH     = 3; // host → client: 인증 응답
+static const uint8_t PACKET_PING     = 4; // client → host: 연결 유지 확인
+static const uint8_t PACKET_PONG     = 5; // host → client: PING 응답
 
 #pragma pack(push, 1)
 

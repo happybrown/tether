@@ -45,6 +45,8 @@ public:
     using KeyRecvCallback     = std::function<void(const KeyPacket&)>;
     using HelloRecvCallback   = std::function<void(const HelloPacket&, const sockaddr_in&)>;
     using AuthAckRecvCallback = std::function<void(const AuthAckPacket&)>;
+    using PingRecvCallback    = std::function<void(const sockaddr_in&)>;
+    using PongRecvCallback    = std::function<void()>;
 
     // host 모드: ip=nullptr, port=listen port
     // client 모드: ip=host ip, port=host port
@@ -52,9 +54,12 @@ public:
                   MouseRecvCallback   mouse_cb    = nullptr,
                   KeyRecvCallback     key_cb      = nullptr,
                   HelloRecvCallback   hello_cb    = nullptr,
-                  AuthAckRecvCallback auth_ack_cb = nullptr)
+                  AuthAckRecvCallback auth_ack_cb = nullptr,
+                  PingRecvCallback    ping_cb     = nullptr,
+                  PongRecvCallback    pong_cb     = nullptr)
         : on_mouse(mouse_cb), on_key(key_cb),
           on_hello(hello_cb), on_auth_ack(auth_ack_cb),
+          on_ping(ping_cb), on_pong(pong_cb),
           server_mode(ip == nullptr)
     {
         sock = make_udp_sock();
@@ -127,6 +132,14 @@ public:
         BCONN_INFO(CAT_NETWORK, "[host] peer registered: %s:%d", ip_str, ntohs(addr.sin_port));
     }
 
+    // host: peer 초기화 (타임아웃 등으로 연결 끊김 시 대기 상태로 복귀)
+    void clear_peer() {
+        std::lock_guard<std::mutex> lock(peer_mutex);
+        peer_known.store(false, std::memory_order_release);
+        peer_addr = {};
+        BCONN_INFO(CAT_NETWORK, "[host] peer cleared");
+    }
+
     // host: AUTH_ACK 전송 (peer 등록 전이므로 sendto 직접 사용)
     void send_auth_result(bool accepted, const char* host_hostname, const sockaddr_in& to) {
         AuthAckPacket pkt{};
@@ -134,6 +147,18 @@ public:
         pkt.accepted    = accepted ? 1 : 0;
         strncpy(pkt.host_hostname, host_hostname, sizeof(pkt.host_hostname) - 1);
         sendto(sock, &pkt, sizeof(pkt), 0, (const sockaddr*)&to, sizeof(to));
+    }
+
+    // client → host: 연결 유지 확인
+    void send_ping() {
+        uint8_t pkt = PACKET_PING;
+        send_raw_any(&pkt, 1);
+    }
+
+    // host → client: PING 응답 (peer_known 필요)
+    void send_pong() {
+        uint8_t pkt = PACKET_PONG;
+        send_raw(&pkt, 1);
     }
 
     // 하위 호환
@@ -153,6 +178,8 @@ private:
     KeyRecvCallback     on_key;
     HelloRecvCallback   on_hello;
     AuthAckRecvCallback on_auth_ack;
+    PingRecvCallback    on_ping;
+    PongRecvCallback    on_pong;
 
     void send_raw(const void* data, size_t len) {
         if (!peer_known.load(std::memory_order_acquire)) return;
@@ -205,6 +232,10 @@ private:
             AuthAckPacket p;
             std::memcpy(&p, buf, sizeof(p));
             on_auth_ack(p);
+        } else if (type == PACKET_PING && n == 1 && on_ping) {
+            on_ping(sender);
+        } else if (type == PACKET_PONG && n == 1 && on_pong) {
+            on_pong();
         }
     }
 };

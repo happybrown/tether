@@ -49,6 +49,8 @@ class BconnManager: ObservableObject {
             }
         }
 
+        config.reconnect_interval_s = UInt16(settings.reconnectInterval)
+
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         bconn_start(&config, { status, msg, ctx in
             guard let ctx else { return }

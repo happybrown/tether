@@ -81,15 +81,37 @@ struct SettingsView: View {
 
             // ── 네트워크 ───────────────────────────────────────────
             SettingsSection(title: "네트워크") {
-                SettingsRow(label: "포트") {
-                    HStack(spacing: 8) {
-                        TextField("24900", value: $settings.port, format: .number)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 80)
-                            .onSubmit { restartIfRunning() }
-                        Text("기본값: 24900")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
+                VStack(spacing: 10) {
+                    SettingsRow(label: "포트") {
+                        HStack(spacing: 8) {
+                            TextField("24900", value: $settings.port, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .onSubmit { restartIfRunning() }
+                            Text("기본값: 24900")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                    }
+
+                    if settings.mode == .client {
+                        Divider()
+
+                        SettingsRow(label: "재연결 간격") {
+                            HStack(spacing: 8) {
+                                Picker("", selection: $settings.reconnectInterval) {
+                                    Text("5초").tag(5)
+                                    Text("10초").tag(10)
+                                    Text("30초").tag(30)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 180)
+                                .labelsHidden()
+                                .onChange(of: settings.reconnectInterval) { _ in
+                                    restartIfRunning()
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -41,12 +41,21 @@ CFMachPortRef          g_key_tap    = nullptr;
 static CFRunLoopRef    g_run_loop   = nullptr;
 static std::thread     g_run_loop_thread;
 
-// 인증 관련 전역
+// 인증 / 연결 유지 관련 전역
 static char              g_psk[128]     = {};
 static char              g_hostname[32] = {};
 std::atomic<bool>        g_auth_ok{false};
-static std::thread       g_heartbeat_thread;
-static std::atomic<bool> g_heartbeat_running{false};
+
+// client: PING 루프 (인증 후 주기적 PING 전송)
+static std::thread       g_ping_thread;
+static std::atomic<bool> g_ping_running{false};
+static uint16_t          g_reconnect_interval_s = 5;
+
+// host: watchdog (마지막 PING 수신 후 30초 초과 시 peer 초기화)
+static std::thread            g_watchdog_thread;
+static std::atomic<bool>      g_watchdog_running{false};
+static std::atomic<time_t>    g_last_ping_time{0};
+static const int              PEER_TIMEOUT_S = 30;
 
 // client 화면 정보 (호스트가 client_handle_move 복귀 판단에 사용)
 std::atomic<int32_t> g_client_width{32000};
@@ -75,6 +84,9 @@ void set_status(BconnStatus s, const char* msg) {
     g_status.store(s);
     if (g_cb) g_cb(s, msg, g_ctx);
 }
+
+// 전방 선언
+static void host_reset_peer(const char* reason);
 
 /// HELLO 패킷을 생성해 host로 전송한다.
 /// PSK가 설정된 경우 HMAC-SHA1을 계산해 삽입한다.
@@ -120,6 +132,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     gethostname(g_hostname, sizeof(g_hostname));
     g_hostname[sizeof(g_hostname) - 1] = '\0';
     g_auth_ok.store(false, std::memory_order_release);
+    g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
 
     BCONN_INFO(CAT_NETWORK, "bconn 시작: 호스트명=%s, 포트=%d", g_hostname, g_cfg.port);
 
@@ -177,8 +190,33 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             g_engine->send_auth_result(accepted, g_hostname, sender);
         };
 
-        g_engine = new NetworkEngine(nullptr, g_cfg.port, on_mouse, nullptr, on_hello, nullptr);
+        // host: PING 수신 → 마지막 수신 시각 갱신 + PONG 응답
+        auto on_ping = [](const sockaddr_in&) {
+            g_last_ping_time.store(time(nullptr), std::memory_order_release);
+            BCONN_DEBUG(CAT_AUTH, "[호스트] PING 수신 → PONG 전송");
+            g_engine->send_pong();
+        };
+
+        g_engine = new NetworkEngine(nullptr, g_cfg.port, on_mouse, nullptr, on_hello, nullptr, on_ping, nullptr);
         g_engine->start();
+
+        // watchdog: PEER_TIMEOUT_S 초 이상 PING 없으면 peer 초기화
+        g_watchdog_running.store(true, std::memory_order_release);
+        g_watchdog_thread = std::thread([] {
+            while (g_watchdog_running.load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                if (!g_watchdog_running.load(std::memory_order_acquire)) break;
+
+                time_t last = g_last_ping_time.load(std::memory_order_acquire);
+                if (last == 0) continue; // 아직 연결된 적 없음
+
+                double elapsed = difftime(time(nullptr), last);
+                if (elapsed >= PEER_TIMEOUT_S) {
+                    BCONN_INFO(CAT_AUTH, "[호스트] PING 타임아웃 (%.0fs) — peer 초기화", elapsed);
+                    host_reset_peer("ping timeout");
+                }
+            }
+        });
 
         // RunLoop 스레드에서 이벤트 탭을 설정해야 CFRunLoopGetCurrent()가 올바른 루프를 반환한다.
         g_run_loop_thread = std::thread([] {
@@ -249,37 +287,53 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             }
         };
 
+        // PONG 수신: 호스트가 살아있음을 확인
+        auto on_pong = []() {
+            BCONN_DEBUG(CAT_AUTH, "[클라이언트] PONG 수신");
+        };
+
         g_engine = new NetworkEngine(g_cfg.host_ip, g_cfg.port,
-                                     on_mouse, on_key, nullptr, on_auth_ack);
+                                     on_mouse, on_key, nullptr, on_auth_ack, nullptr, on_pong);
         g_engine->start();
 
-        BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 전송: %s:%d", g_cfg.host_ip, g_cfg.port);
+        BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 전송: %s:%d (재시도 간격=%us)",
+                   g_cfg.host_ip, g_cfg.port, g_reconnect_interval_s);
         send_hello();
         set_status(BCONN_STATUS_WAITING, "인증 대기 중");
 
-        // heartbeat: 5초마다 HELLO 재전송 → host 재시작 후 자동 재연결
-        g_heartbeat_running.store(true, std::memory_order_release);
-        g_heartbeat_thread = std::thread([] {
-            while (g_heartbeat_running.load(std::memory_order_acquire)) {
-                for (int i = 0; i < 50 && g_heartbeat_running.load(); ++i)
+        // ping 루프: 인증 전에는 HELLO 재전송, 인증 후에는 PING 전송
+        g_ping_running.store(true, std::memory_order_release);
+        g_ping_thread = std::thread([] {
+            const int interval_s = g_reconnect_interval_s;
+            while (g_ping_running.load(std::memory_order_acquire)) {
+                // 100ms 단위로 쪼개 sleep → 빠른 종료 응답
+                for (int i = 0; i < interval_s * 10 && g_ping_running.load(); ++i)
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                if (!g_heartbeat_running.load(std::memory_order_acquire)) break;
+                if (!g_ping_running.load(std::memory_order_acquire)) break;
 
-                bool was_auth = g_auth_ok.load(std::memory_order_acquire);
-                g_auth_ok.store(false, std::memory_order_release);
-                if (was_auth) {
-                    BCONN_INFO(CAT_AUTH, "[클라이언트] 하트비트: 재인증 시도");
-                    set_status(BCONN_STATUS_WAITING, "재연결 중...");
+                if (g_auth_ok.load(std::memory_order_acquire)) {
+                    // 인증 완료 상태: PING으로 연결 유지
+                    BCONN_DEBUG(CAT_AUTH, "[클라이언트] PING 전송");
+                    g_engine->send_ping();
                 } else {
-                    BCONN_DEBUG(CAT_AUTH, "[클라이언트] 하트비트: HELLO 재전송");
+                    // 미인증 상태: HELLO 재전송으로 핸드쉐이크 재시도
+                    BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 재전송 (미인증 또는 재연결)");
+                    send_hello();
                 }
-                send_hello();
             }
         });
     }
 
     BCONN_INFO(CAT_NETWORK, "bconn_start 완료");
     return true;
+}
+
+// host 전용: peer 연결을 초기화하고 대기 상태로 복귀
+static void host_reset_peer(const char* reason) {
+    BCONN_INFO(CAT_AUTH, "[호스트] peer 연결 초기화: %s", reason);
+    g_engine->clear_peer();
+    g_last_ping_time.store(0, std::memory_order_release);
+    set_status(BCONN_STATUS_WAITING, "client 접속 대기 중");
 }
 
 void bconn_stop() {
@@ -289,8 +343,11 @@ void bconn_stop() {
     g_cb  = nullptr;
     g_ctx = nullptr;
 
-    g_heartbeat_running.store(false, std::memory_order_release);
-    if (g_heartbeat_thread.joinable()) g_heartbeat_thread.join();
+    g_ping_running.store(false, std::memory_order_release);
+    if (g_ping_thread.joinable()) g_ping_thread.join();
+
+    g_watchdog_running.store(false, std::memory_order_release);
+    if (g_watchdog_thread.joinable()) g_watchdog_thread.join();
 
     if (g_run_loop) {
         CFRunLoopStop(g_run_loop);

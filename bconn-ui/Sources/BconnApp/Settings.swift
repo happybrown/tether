@@ -54,17 +54,21 @@ class AppSettings: ObservableObject {
             save()
         }
     }
+    @Published var reconnectInterval: Int {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
     private init() {
-        mode          = AppMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .host
-        hostIP        = defaults.string(forKey: "hostIP") ?? ""
-        port          = defaults.integer(forKey: "port").nonZero ?? 24900
-        clientEdge    = ClientEdge(rawValue: defaults.integer(forKey: "clientEdge")) ?? .right
-        launchAtLogin = defaults.bool(forKey: "launchAtLogin")
-        autoStart     = defaults.bool(forKey: "autoStart")
-        psk           = KeychainHelper.read()
+        mode               = AppMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .host
+        hostIP             = defaults.string(forKey: "hostIP") ?? ""
+        port               = defaults.integer(forKey: "port").nonZero ?? 24900
+        clientEdge         = ClientEdge(rawValue: defaults.integer(forKey: "clientEdge")) ?? .right
+        launchAtLogin      = defaults.bool(forKey: "launchAtLogin")
+        autoStart          = defaults.bool(forKey: "autoStart")
+        psk                = KeychainHelper.read()
+        reconnectInterval  = defaults.integer(forKey: "reconnectInterval").nonZero ?? 5
     }
 
     private func save() {
@@ -74,6 +78,7 @@ class AppSettings: ObservableObject {
         defaults.set(clientEdge.rawValue, forKey: "clientEdge")
         defaults.set(launchAtLogin,       forKey: "launchAtLogin")
         defaults.set(autoStart,           forKey: "autoStart")
+        defaults.set(reconnectInterval,   forKey: "reconnectInterval")
         // psk는 didSet에서 Keychain에 직접 저장하므로 여기서는 생략
     }
 }
