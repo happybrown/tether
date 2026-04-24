@@ -90,6 +90,25 @@ class BconnManager: ObservableObject {
         Task.detached { bconn_stop() }
     }
 
+    /// 재시작 시 stop 과 start 가 race 하지 않도록 완료 대기.
+    /// C++ 측 g_lifecycle_mu 가 실제 상호 배제를 수행하지만, 여기서는 main thread 가
+    /// 잠시라도 block 되는 걸 피하기 위해 background 에서 순차 실행한다.
+    func restart() {
+        isRunning = false
+        status = .idle
+        statusMessage = "재시작 중..."
+        connectedHostname = ""
+        authFailed = false
+        NotificationCenter.default.post(name: .bconnStatusChanged, object: nil)
+
+        Task.detached { [weak self] in
+            bconn_stop()
+            await MainActor.run {
+                self?.start()
+            }
+        }
+    }
+
     var statusLabel: String {
         switch status {
         case .idle:        return "중지됨"

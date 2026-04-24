@@ -68,6 +68,23 @@ struct MenuBarView: View {
 
             // ── 시작 / 중지 ────────────────────────────────────────
             if manager.isRunning {
+                if manager.status == .remote {
+                    Button(action: { bconn_force_local() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.uturn.backward")
+                            Text("강제 로컬 복귀")
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(Color.orange.opacity(0.12))
+                        .foregroundStyle(.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                }
                 Button(action: { manager.stop() }) {
                     HStack(spacing: 6) {
                         Image(systemName: "stop.fill")

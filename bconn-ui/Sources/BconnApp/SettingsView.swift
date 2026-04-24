@@ -149,8 +149,7 @@ struct SettingsView: View {
 
     private func restartIfRunning() {
         guard manager.isRunning else { return }
-        manager.stop()
-        manager.start()
+        manager.restart()
     }
 }
 
