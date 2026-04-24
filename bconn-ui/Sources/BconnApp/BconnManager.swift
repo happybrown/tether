@@ -159,17 +159,16 @@ class BconnManager: ObservableObject {
         }
     }
 
-    /// 메뉴바 아이콘의 "화면 부분" 색상. 테두리는 시스템 색으로 유지하고
-    /// 모니터 내부만 이 색으로 칠해 상태를 한눈에 구분한다.
-    var menuBarTint: NSColor {
+    /// 메뉴바에 노출될 SF Symbol 이름. 상태를 아이콘으로도 구분해 색맹·빠른 확인을 돕는다.
+    var menuBarSymbol: String {
         switch status {
-        case .idle:        return .tertiaryLabelColor        // 회색 — 대기 없음
-        case .waiting:     return .systemYellow              // 노랑 — 연결 대기
-        case .connected:   return .systemGreen               // 초록 — 정상 연결
-        case .remote:      return .systemBlue                // 파랑 — 원격 활성
-        case .error:       return .systemRed                 // 빨강 — 에러
-        case .authFailed:  return .systemOrange              // 주황 — 인증 실패
-        default:           return .tertiaryLabelColor
+        case .idle:        return "display.2"
+        case .waiting:     return "display.2"
+        case .connected:   return "display.2"
+        case .remote:      return "arrow.left.arrow.right"
+        case .error:       return "exclamationmark.triangle.fill"
+        case .authFailed:  return "lock.trianglebadge.exclamationmark.fill"
+        default:           return "display.2"
         }
     }
 }

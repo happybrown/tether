@@ -15,7 +15,6 @@
 		588784F1F7CB27E609B920C0 /* ClientHandler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2309A9FAA131AA1D16F1E258 /* ClientHandler.cpp */; };
 		5ADC9EB3892B3B2C1829B01B /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75861A90FB82B226309DA2C2 /* LogView.swift */; };
 		8A14B11702867F0B43FF3C7A /* NetworkEngine.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = A0A406DBFC60C323BA226859 /* NetworkEngine.h */; };
-		8C1EFDF953DB410398C42E95 /* MenuBarIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41597C0455DBB8DF04F39E5 /* MenuBarIcon.swift */; };
 		8C726DBBA4D96269E103128D /* NetworkEngineTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = BF6024D1E3DB732CA38D43BA /* NetworkEngineTests.mm */; };
 		A9B496B3F0354843E721D9B8 /* EventTap.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = FE76BCAA927847B06D69DEA7 /* EventTap.h */; };
 		AAD837159C3647375E355746 /* BconnManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A0CE605E4F7AC40E87FF9D /* BconnManager.swift */; };
@@ -97,7 +96,6 @@
 		969433EF58270DD1EE417E64 /* LockFreeQueue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LockFreeQueue.h; sourceTree = "<group>"; };
 		9CA6D10B99C286BF7B2BC6B2 /* BconnCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BconnCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0A406DBFC60C323BA226859 /* NetworkEngine.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NetworkEngine.h; sourceTree = "<group>"; };
-		A41597C0455DBB8DF04F39E5 /* MenuBarIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIcon.swift; sourceTree = "<group>"; };
 		AEA4095088C915E42761F301 /* BconnApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BconnApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B237BFCA45EA78AD9E6E7AB7 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		BF6024D1E3DB732CA38D43BA /* NetworkEngineTests.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = NetworkEngineTests.mm; sourceTree = "<group>"; };
@@ -169,7 +167,6 @@
 				502323E9E75487C909C78537 /* Info.plist */,
 				F33693C7BB1D3F114B12701E /* LaunchAtLogin.swift */,
 				75861A90FB82B226309DA2C2 /* LogView.swift */,
-				A41597C0455DBB8DF04F39E5 /* MenuBarIcon.swift */,
 				B237BFCA45EA78AD9E6E7AB7 /* MenuBarView.swift */,
 				179F77E9ED741BCE9CD44214 /* Settings.swift */,
 				EE1F0A420526CB687F86F7DB /* SettingsView.swift */,
@@ -369,7 +366,6 @@
 				F8A0B4C10752DD0AA3949C3C /* BconnStatus+Swift.swift in Sources */,
 				DCAD531F473F3DB11D33A788 /* LaunchAtLogin.swift in Sources */,
 				5ADC9EB3892B3B2C1829B01B /* LogView.swift in Sources */,
-				8C1EFDF953DB410398C42E95 /* MenuBarIcon.swift in Sources */,
 				FD1EF6C8DCB416EBEB579B56 /* MenuBarView.swift in Sources */,
 				1D53F63E5A336248D87FEB7D /* Settings.swift in Sources */,
 				12988083C3A6DA0FE30E830A /* SettingsView.swift in Sources */,
