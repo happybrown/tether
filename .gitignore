@@ -1,3 +1,6 @@
 bin/
 bconn-ui/.build/
 bconn-ui/build/
+bconn-ui/**/*.xcodeproj/project.pbxproj
+bconn-ui/**/*.xcodeproj/xcuserdata/
+bconn-ui/**/*.xcodeproj/project.xcworkspace/xcuserdata/
