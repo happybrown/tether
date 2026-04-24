@@ -94,10 +94,11 @@ enum KeychainHelper {
 
     static func read() -> String {
         let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-            kSecReturnData:  true,
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      service,
+            kSecAttrAccount:      account,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitOne,
         ]
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -113,12 +114,12 @@ enum KeychainHelper {
             kSecAttrService: service,
             kSecAttrAccount: account,
         ]
-        let attrs: [CFString: Any] = [kSecValueData: data]
-        if SecItemUpdate(query as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
-            var item = query
-            item[kSecValueData] = data
-            SecItemAdd(item as CFDictionary, nil)
-        }
+        // kSecAttrAccessible은 생성 후 변경 불가 + 프롬프트 방지를 위해 항상 삭제 후 재삽입.
+        SecItemDelete(query as CFDictionary)
+        var item = query
+        item[kSecValueData]      = data
+        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(item as CFDictionary, nil)
     }
 
     static func delete() {
