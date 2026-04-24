@@ -340,17 +340,24 @@ private struct ActionButton: View {
     let help: String
     let action: () -> Void
 
+    @State private var pressed = false
+
     var body: some View {
-        Button(action: action) {
+        Button {
+            pressed = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pressed = false }
+            action()
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                 Text(label).fontWeight(.medium)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
-            .background(tint.opacity(0.12))
+            .background(tint.opacity(pressed ? 0.28 : 0.12))
             .foregroundStyle(tint)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .animation(.easeOut(duration: 0.12), value: pressed)
         }
         .buttonStyle(.plain)
         .help(help)
@@ -363,6 +370,9 @@ private struct MenuRowButton: View {
     let shortcut: String?
     let action: () -> Void
 
+    @State private var hovered = false
+    @State private var pressed = false
+
     init(icon: String, label: String, shortcut: String? = nil, action: @escaping () -> Void) {
         self.icon = icon
         self.label = label
@@ -371,7 +381,11 @@ private struct MenuRowButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            pressed = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pressed = false }
+            action()
+        } label: {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .frame(width: 16)
@@ -380,14 +394,22 @@ private struct MenuRowButton: View {
                 if let shortcut {
                     Text(shortcut)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(pressed ? Color.accentColor.opacity(0.25) :
+                          hovered ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+            .foregroundStyle(hovered || pressed ? Color.primary : Color.primary.opacity(0.85))
             .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.1), value: hovered)
+            .animation(.easeOut(duration: 0.1), value: pressed)
         }
         .buttonStyle(.plain)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .onHover { hovered = $0 }
     }
 }
