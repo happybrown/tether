@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 enum ClientEdge: Int, CaseIterable, Identifiable, Codable {
     case right  = 0
@@ -49,10 +48,7 @@ class AppSettings: ObservableObject {
         didSet { save() }
     }
     @Published var psk: String {
-        didSet {
-            psk.isEmpty ? KeychainHelper.delete() : KeychainHelper.write(psk)
-            save()
-        }
+        didSet { save() }
     }
     @Published var reconnectInterval: Int {
         didSet { save() }
@@ -67,7 +63,7 @@ class AppSettings: ObservableObject {
         clientEdge         = ClientEdge(rawValue: defaults.integer(forKey: "clientEdge")) ?? .right
         launchAtLogin      = defaults.bool(forKey: "launchAtLogin")
         autoStart          = defaults.bool(forKey: "autoStart")
-        psk                = KeychainHelper.read()
+        psk                = defaults.string(forKey: "psk") ?? ""
         reconnectInterval  = defaults.integer(forKey: "reconnectInterval").nonZero ?? 5
     }
 
@@ -79,7 +75,7 @@ class AppSettings: ObservableObject {
         defaults.set(launchAtLogin,       forKey: "launchAtLogin")
         defaults.set(autoStart,           forKey: "autoStart")
         defaults.set(reconnectInterval,   forKey: "reconnectInterval")
-        // psk는 didSet에서 Keychain에 직접 저장하므로 여기서는 생략
+        defaults.set(psk,                 forKey: "psk")
     }
 }
 
@@ -87,47 +83,3 @@ private extension Int {
     var nonZero: Int? { self == 0 ? nil : self }
 }
 
-// PSK는 UserDefaults 대신 Keychain에 저장한다.
-enum KeychainHelper {
-    private static let service = "com.bconn.app"
-    private static let account = "psk"
-
-    static func read() -> String {
-        let query: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrService:      service,
-            kSecAttrAccount:      account,
-            kSecReturnData:       true,
-            kSecMatchLimit:       kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let str  = String(data: data, encoding: .utf8) else { return "" }
-        return str
-    }
-
-    static func write(_ value: String) {
-        let data = Data(value.utf8)
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-        ]
-        // kSecAttrAccessible은 생성 후 변경 불가 + 프롬프트 방지를 위해 항상 삭제 후 재삽입.
-        SecItemDelete(query as CFDictionary)
-        var item = query
-        item[kSecValueData]      = data
-        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(item as CFDictionary, nil)
-    }
-
-    static func delete() {
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-}
