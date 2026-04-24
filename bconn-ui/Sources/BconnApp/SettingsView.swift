@@ -191,8 +191,29 @@ struct SettingsView: View {
             }
 
             Spacer(minLength: 0)
+
+            // ── 시작 / 중지 ────────────────────────────────────────
+            Divider()
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(manager.statusColor)
+                    .frame(width: 8, height: 8)
+                Text(manager.statusLabel)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if manager.isRunning {
+                    Button("중지") { manager.stop() }
+                        .keyboardShortcut(.escape, modifiers: [])
+                } else {
+                    Button("시작") { manager.start() }
+                        .keyboardShortcut(.return, modifiers: [])
+                        .disabled(!canStart)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .padding(20)
         .frame(width: 480)
         .onAppear {
             portString = String(settings.port)
@@ -205,6 +226,11 @@ struct SettingsView: View {
                 portString = String(newValue)
             }
         }
+    }
+
+    private var canStart: Bool {
+        if settings.mode == .host { return manager.hasAccessibilityPermission }
+        return !settings.hostIP.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private func restartIfRunning() {
