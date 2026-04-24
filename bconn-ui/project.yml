@@ -48,6 +48,7 @@ targets:
         OTHER_LDFLAGS:
           - -framework ServiceManagement
         INFOPLIST_FILE: Sources/BconnApp/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
         # 메뉴바 전용 앱 — Dock 아이콘 없음
         LSUIElement: YES
