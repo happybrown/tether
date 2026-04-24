@@ -9,6 +9,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // signal() 로 기본 핸들러를 무시한 뒤 DispatchSource 로 포착한다.
     private var signalSources: [DispatchSourceSignal] = []
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        let bundleID = Bundle.main.bundleIdentifier!
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        if running.count > 1 {
+            running.first { !$0.isActive }?.activate()
+            NSApp.terminate(nil)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 로그 콜백을 먼저 등록한 뒤 세션을 시작해야 초기 로그를 놓치지 않는다
         _ = BconnLogger.shared
