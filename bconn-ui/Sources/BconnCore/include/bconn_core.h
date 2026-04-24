@@ -52,6 +52,14 @@ void bconn_set_log_callback(BconnLogCallback cb, void* ctx);
 bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx);
 void bconn_stop(void);
 
+// atexit + 시그널 핸들러 설치 (crash/정상 종료 시 이벤트 탭 비활성화 + 커서 연동 복구).
+// 반복 호출해도 실제 설치는 1회만 이뤄진다. bconn_start 진입부에서 자동 호출된다.
+void bconn_install_safety_hooks(void);
+
+// 사용자 escape hatch: 원격 모드에 갇혔을 때 로컬로 강제 복귀.
+// host 는 원격 모드를 종료, client 는 인증/원격 상태를 리셋해 재연결한다.
+void bconn_force_local(void);
+
 BconnStatus bconn_get_status(void);
 
 // 현재 호스트의 로컬 IP 목록 — '\n'으로 구분된 문자열을 out 버퍼에 기록

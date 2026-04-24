@@ -3,9 +3,16 @@ import BconnCore
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
+    // SIGTERM/SIGINT/SIGHUP 수신 시 bconn_stop → terminate 경로로 유도한다.
+    // Swift runtime 이 기본값(프로세스 즉시 종료)을 쓰면 cleanup 이 생략되므로
+    // signal() 로 기본 핸들러를 무시한 뒤 DispatchSource 로 포착한다.
+    private var signalSources: [DispatchSourceSignal] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 로그 콜백을 먼저 등록한 뒤 세션을 시작해야 초기 로그를 놓치지 않는다
         _ = BconnLogger.shared
+
+        installSignalHandlers()
 
         let s = AppSettings.shared
         guard s.autoStart else { return }
@@ -22,6 +29,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         BconnManager.shared.stop()
+    }
+
+    private func installSignalHandlers() {
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler {
+                MainActor.assumeIsolated {
+                    BconnManager.shared.stop()
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+            src.resume()
+            signalSources.append(src)
+        }
     }
 }
 

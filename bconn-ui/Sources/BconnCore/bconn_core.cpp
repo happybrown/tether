@@ -20,6 +20,10 @@
 #include <ctime>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <csignal>
+#include <cstdlib>
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -38,8 +42,14 @@ BconnConfig            g_cfg{};
 NetworkEngine*         g_engine     = nullptr;
 CFMachPortRef          g_mouse_tap  = nullptr;
 CFMachPortRef          g_key_tap    = nullptr;
-static CFRunLoopRef    g_run_loop   = nullptr;
-static std::thread     g_run_loop_thread;
+
+// g_run_loop: RunLoop 스레드가 CFRunLoopRun 진입 직전에 저장한다.
+// 값이 nullptr 이 아니면 "RunLoop 준비 완료", (CFRunLoopRef)-1 은 "setup 실패" 를 의미한다.
+// bconn_stop 은 cv 로 준비를 기다린 후 CFRunLoopStop 을 호출한다.
+std::atomic<CFRunLoopRef>      g_run_loop{nullptr};
+static std::mutex              g_run_loop_mu;
+static std::condition_variable g_run_loop_cv;
+static std::thread             g_run_loop_thread;
 
 // 인증 / 연결 유지 관련 전역
 static char              g_psk[128]     = {};
@@ -51,11 +61,20 @@ static std::thread       g_ping_thread;
 static std::atomic<bool> g_ping_running{false};
 static uint16_t          g_reconnect_interval_s = 5;
 
-// host: watchdog (마지막 PING 수신 후 30초 초과 시 peer 초기화)
+// host: watchdog — 이중 타임아웃
+//   PEER_WARNING_S : 연결 unhealthy 경고
+//   PEER_TIMEOUT_S : peer 초기화 + 원격 모드 강제 종료
 static std::thread            g_watchdog_thread;
 static std::atomic<bool>      g_watchdog_running{false};
 static std::atomic<time_t>    g_last_ping_time{0};
+static const int              PEER_WARNING_S = 15;
 static const int              PEER_TIMEOUT_S = 30;
+
+// client: 마지막 PONG 수신 시각 (Host 생존 확인)
+static std::atomic<time_t>    g_last_pong_time{0};
+
+// start/stop 재진입/경쟁 방지. set_status 의 콜백은 이 lock 을 쓰지 않는다 (lock-free).
+static std::mutex             g_lifecycle_mu;
 
 // client 화면 정보 (호스트가 client_handle_move 복귀 판단에 사용)
 std::atomic<int32_t> g_client_width{32000};
@@ -87,6 +106,7 @@ void set_status(BconnStatus s, const char* msg) {
 
 // 전방 선언
 static void host_reset_peer(const char* reason);
+static void client_reset_on_host_dead(const char* reason);
 
 /// HELLO 패킷을 생성해 host로 전송한다.
 /// PSK가 설정된 경우 HMAC-SHA1을 계산해 삽입한다.
@@ -113,6 +133,9 @@ static void send_hello() {
 // ── 공개 API ─────────────────────────────────────────────────────────
 
 bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
+    bconn_install_safety_hooks();
+
     BCONN_INFO(CAT_NETWORK, "bconn_start: 모드=%s, 포트=%d, PSK=%s",
                config->is_host ? "호스트" : "클라이언트",
                config->port,
@@ -200,32 +223,66 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         g_engine = new NetworkEngine(nullptr, g_cfg.port, on_mouse, nullptr, on_hello, nullptr, on_ping, nullptr);
         g_engine->start();
 
-        // watchdog: PEER_TIMEOUT_S 초 이상 PING 없으면 peer 초기화
+        // watchdog: 2초 주기로 점검.
+        //   >= PEER_WARNING_S : "연결 불안정" 상태 표시 (1회)
+        //   >= PEER_TIMEOUT_S : peer 초기화 + 원격 모드 강제 종료
         g_watchdog_running.store(true, std::memory_order_release);
         g_watchdog_thread = std::thread([] {
+            bool warned = false;
             while (g_watchdog_running.load(std::memory_order_acquire)) {
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+                std::this_thread::sleep_for(std::chrono::seconds(2));
                 if (!g_watchdog_running.load(std::memory_order_acquire)) break;
 
                 time_t last = g_last_ping_time.load(std::memory_order_acquire);
-                if (last == 0) continue; // 아직 연결된 적 없음
+                if (last == 0) { warned = false; continue; }
 
                 double elapsed = difftime(time(nullptr), last);
                 if (elapsed >= PEER_TIMEOUT_S) {
-                    BCONN_INFO(CAT_AUTH, "[호스트] PING 타임아웃 (%.0fs) — peer 초기화", elapsed);
+                    BCONN_ERROR(CAT_AUTH, "[호스트] PING 타임아웃 (%.0fs) — peer 초기화", elapsed);
                     host_reset_peer("ping timeout");
+                    warned = false;
+                } else if (!warned && elapsed >= PEER_WARNING_S) {
+                    BCONN_INFO(CAT_AUTH, "[호스트] PING 지연 (%.0fs) — 연결 불안정", elapsed);
+                    set_status(BCONN_STATUS_WAITING, "연결 불안정");
+                    warned = true;
                 }
             }
         });
 
         // RunLoop 스레드에서 이벤트 탭을 설정해야 CFRunLoopGetCurrent()가 올바른 루프를 반환한다.
+        // 호출자(bconn_start)는 setup 및 상태 전환까지 완료를 기다려 반환 후 즉시
+        // bconn_get_status 가 의미 있는 값을 반환하도록 한다.
         g_run_loop_thread = std::thread([] {
             setup_event_taps();
-            if (g_status.load() != BCONN_STATUS_ERROR) {
-                set_status(BCONN_STATUS_WAITING, "client 접속 대기 중");
-                CFRunLoopRun();
+            if (g_status.load() == BCONN_STATUS_ERROR) {
+                {
+                    std::lock_guard<std::mutex> lk(g_run_loop_mu);
+                    g_run_loop.store((CFRunLoopRef)-1, std::memory_order_release);
+                }
+                g_run_loop_cv.notify_all();
+                return;
             }
+
+            set_status(BCONN_STATUS_WAITING, "client 접속 대기 중");
+            {
+                std::lock_guard<std::mutex> lk(g_run_loop_mu);
+                g_run_loop.store(CFRunLoopGetCurrent(), std::memory_order_release);
+            }
+            g_run_loop_cv.notify_all();
+
+            CFRunLoopRun();
+
+            std::lock_guard<std::mutex> lk(g_run_loop_mu);
+            g_run_loop.store(nullptr, std::memory_order_release);
         });
+
+        // run_loop 스레드가 setup 완료 후 상태 전환 + g_run_loop 저장까지 마치기를 기다린다.
+        {
+            std::unique_lock<std::mutex> lk(g_run_loop_mu);
+            g_run_loop_cv.wait_for(lk, std::chrono::seconds(2), [] {
+                return g_run_loop.load(std::memory_order_acquire) != nullptr;
+            });
+        }
 
     } else {
         // client 모드
@@ -277,6 +334,8 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         auto on_auth_ack = [](const AuthAckPacket& pkt) {
             if (pkt.accepted) {
                 g_auth_ok.store(true, std::memory_order_release);
+                // 인증 직후 PONG 기준점 설정 — 아직 PONG 수신 전이라도 dead 판정 방지
+                g_last_pong_time.store(time(nullptr), std::memory_order_release);
                 send_client_info();
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");
                 BCONN_INFO(CAT_AUTH, "[클라이언트] 인증 성공: 호스트=%s", pkt.host_hostname);
@@ -289,6 +348,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
 
         // PONG 수신: 호스트가 살아있음을 확인
         auto on_pong = []() {
+            g_last_pong_time.store(time(nullptr), std::memory_order_release);
             BCONN_DEBUG(CAT_AUTH, "[클라이언트] PONG 수신");
         };
 
@@ -301,10 +361,12 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         send_hello();
         set_status(BCONN_STATUS_WAITING, "인증 대기 중");
 
-        // ping 루프: 인증 전에는 HELLO 재전송, 인증 후에는 PING 전송
+        // ping 루프: 인증 전에는 HELLO 재전송, 인증 후에는 PING 전송.
+        // PONG 이 pong_timeout_s 이상 오지 않으면 Host 사망으로 판정해 재인증으로 돌아간다.
         g_ping_running.store(true, std::memory_order_release);
         g_ping_thread = std::thread([] {
             const int interval_s = g_reconnect_interval_s;
+            const int pong_timeout_s = std::max(30, interval_s * 3);
             while (g_ping_running.load(std::memory_order_acquire)) {
                 // 100ms 단위로 쪼개 sleep → 빠른 종료 응답
                 for (int i = 0; i < interval_s * 10 && g_ping_running.load(); ++i)
@@ -312,11 +374,14 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 if (!g_ping_running.load(std::memory_order_acquire)) break;
 
                 if (g_auth_ok.load(std::memory_order_acquire)) {
-                    // 인증 완료 상태: PING으로 연결 유지
                     BCONN_DEBUG(CAT_AUTH, "[클라이언트] PING 전송");
                     g_engine->send_ping();
+
+                    time_t last = g_last_pong_time.load(std::memory_order_acquire);
+                    if (last != 0 && difftime(time(nullptr), last) >= pong_timeout_s) {
+                        client_reset_on_host_dead("PONG 타임아웃");
+                    }
                 } else {
-                    // 미인증 상태: HELLO 재전송으로 핸드쉐이크 재시도
                     BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 재전송 (미인증 또는 재연결)");
                     send_hello();
                 }
@@ -328,15 +393,89 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     return true;
 }
 
-// host 전용: peer 연결을 초기화하고 대기 상태로 복귀
+// ── 비정상 종료 안전 훅 ──────────────────────────────────────────────
+//
+// crash / atexit 경로에서 이벤트 탭을 비활성화하고 커서-포인터 연동을 복구한다.
+// SIGTERM/SIGINT/SIGHUP 은 Swift DispatchSource 가 맡아 정상 bconn_stop 경로로 유도하고,
+// 여기서는 catch 불가능/복구 불가능한 crash 계열만 처리한다.
+
+static std::atomic<bool> g_safety_installed{false};
+
+// async-signal-safe 한계 내에서만 호출. CGEvent* 계열은 공식 보장은 없으나
+// 단일 Mach RPC 이므로 실무상 안전하고, 실패해도 기존보다 나쁠 것 없다.
+static void safety_cleanup() {
+    if (g_mouse_tap) CGEventTapEnable(g_mouse_tap, false);
+    if (g_key_tap)   CGEventTapEnable(g_key_tap,   false);
+    CGAssociateMouseAndMouseCursorPosition(true);
+
+    CGDirectDisplayID main_id = CGMainDisplayID();
+    CGRect b = CGDisplayBounds(main_id);
+    CGWarpMouseCursorPosition(CGPointMake(b.origin.x + b.size.width * 0.5,
+                                          b.origin.y + b.size.height * 0.5));
+}
+
+static void crash_signal_handler(int sig) {
+    static const char msg[] = "[bconn] crash signal — restoring input\n";
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    safety_cleanup();
+    // 원래 동작 복원 후 재전달 → core dump / 디버거
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void bconn_install_safety_hooks() {
+    bool expected = false;
+    if (!g_safety_installed.compare_exchange_strong(expected, true)) return;
+
+    atexit(safety_cleanup);
+
+    struct sigaction sa{};
+    sa.sa_handler = crash_signal_handler;
+    sa.sa_flags   = SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+
+    // crash 계열만 처리 (SIGKILL/SIGSTOP 은 catch 불가).
+    // SIGTERM/SIGINT/SIGHUP 은 Swift 측 DispatchSource 가 맡는다.
+    const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGPIPE };
+    for (int s : sigs) {
+        struct sigaction old{};
+        sigaction(s, nullptr, &old);
+        // 디버거 등이 이미 설치한 핸들러는 덮어쓰지 않음.
+        if (old.sa_handler == SIG_DFL || old.sa_handler == SIG_IGN)
+            sigaction(s, &sa, nullptr);
+    }
+    BCONN_INFO(CAT_NETWORK, "safety hook 설치 완료");
+}
+
+// host 전용: peer 연결을 초기화하고 대기 상태로 복귀.
+// 원격 모드였다면 먼저 로컬 복귀시켜 Host 의 마우스/키보드 소비를 멈춘다.
 static void host_reset_peer(const char* reason) {
     BCONN_INFO(CAT_AUTH, "[호스트] peer 연결 초기화: %s", reason);
+    force_leave_remote(reason);
     g_engine->clear_peer();
     g_last_ping_time.store(0, std::memory_order_release);
     set_status(BCONN_STATUS_WAITING, "client 접속 대기 중");
 }
 
+// client 전용: Host 무응답 감지 시 호출. 인증/원격 상태를 해제해
+// 다음 ping 루프에서 HELLO 재전송으로 자동 재연결되도록 한다.
+static void client_reset_on_host_dead(const char* reason) {
+    BCONN_ERROR(CAT_AUTH, "[클라이언트] 호스트 연결 끊김 감지: %s", reason);
+    g_auth_ok.store(false, std::memory_order_release);
+    if (g_client.pos_init) {
+        g_client.pos_init = false;
+        if (g_client.cursor_hidden) {
+            id cls = (id)objc_getClass("NSCursor");
+            ((void(*)(id,SEL))objc_msgSend)(cls, sel_registerName("unhide"));
+            g_client.cursor_hidden = false;
+        }
+    }
+    g_last_pong_time.store(0, std::memory_order_release);
+    set_status(BCONN_STATUS_WAITING, "호스트 응답 없음 — 재연결 중");
+}
+
 void bconn_stop() {
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
     BCONN_INFO(CAT_NETWORK, "bconn_stop: 연결 종료 시작");
 
     // join 대기 중 set_status → Swift 콜백 → 메인 스레드 데드락 방지
@@ -349,11 +488,18 @@ void bconn_stop() {
     g_watchdog_running.store(false, std::memory_order_release);
     if (g_watchdog_thread.joinable()) g_watchdog_thread.join();
 
-    if (g_run_loop) {
-        CFRunLoopStop(g_run_loop);
-        g_run_loop = nullptr;
+    // RunLoop 스레드가 아직 CFRunLoopRun 에 진입하기 전이면 Stop 이 무시되어 join 이 영구 블록된다.
+    // 준비 완료 또는 setup 실패 (reinterpret -1) 를 최대 2초 기다린 뒤 Stop 을 호출한다.
+    {
+        std::unique_lock<std::mutex> lk(g_run_loop_mu);
+        g_run_loop_cv.wait_for(lk, std::chrono::seconds(2), [] {
+            return g_run_loop.load(std::memory_order_acquire) != nullptr;
+        });
+        CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
+        if (rl && rl != (CFRunLoopRef)-1) CFRunLoopStop(rl);
     }
     if (g_run_loop_thread.joinable()) g_run_loop_thread.join();
+    g_run_loop.store(nullptr, std::memory_order_release);
 
     teardown_event_taps();
 
@@ -364,9 +510,13 @@ void bconn_stop() {
 
     CGAssociateMouseAndMouseCursorPosition(true);
     show_cursor();
-    g_remote  = {};
+    g_remote.active.store(false, std::memory_order_release);
+    g_remote.virtual_x = g_remote.virtual_y = 0.0;
+    g_remote.entry_x = g_remote.entry_y = 0.0;
+    g_remote.entry_guard = g_remote.return_guard = 0;
     g_client  = {};
     g_auth_ok.store(false, std::memory_order_release);
+    g_last_pong_time.store(0, std::memory_order_release);
     set_status(BCONN_STATUS_IDLE, "중지됨");
 
     BCONN_INFO(CAT_NETWORK, "bconn_stop 완료");
@@ -374,6 +524,15 @@ void bconn_stop() {
 
 BconnStatus bconn_get_status() {
     return g_status.load();
+}
+
+void bconn_force_local() {
+    if (g_status.load() == BCONN_STATUS_IDLE) return;
+    if (g_cfg.is_host) {
+        force_leave_remote("사용자 요청");
+    } else {
+        client_reset_on_host_dead("사용자 요청");
+    }
 }
 
 int bconn_get_local_ips(char* out, int out_size) {

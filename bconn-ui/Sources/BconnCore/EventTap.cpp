@@ -14,13 +14,14 @@
 
 // ── bconn_core.cpp 에서 가져오는 전역 ────────────────────────────────
 
-extern BconnConfig          g_cfg;
-extern NetworkEngine*       g_engine;
-extern CFMachPortRef        g_mouse_tap;
-extern CFMachPortRef        g_key_tap;
-extern std::atomic<int32_t> g_client_width;
-extern std::atomic<int32_t> g_client_height;
-extern RemoteState          g_remote;
+extern BconnConfig              g_cfg;
+extern NetworkEngine*           g_engine;
+extern CFMachPortRef            g_mouse_tap;
+extern CFMachPortRef            g_key_tap;
+extern std::atomic<int32_t>     g_client_width;
+extern std::atomic<int32_t>     g_client_height;
+extern RemoteState              g_remote;
+extern std::atomic<CFRunLoopRef> g_run_loop;
 
 void set_status(BconnStatus s, const char* msg);
 
@@ -166,12 +167,12 @@ static CGPoint return_point() {
 }
 
 static void enter_remote(CGPoint loc) {
-    g_remote.active      = true;
     g_remote.virtual_x   = 0.0;
     g_remote.virtual_y   = 0.0;
     g_remote.entry_x     = loc.x;
     g_remote.entry_y     = loc.y;
     g_remote.entry_guard = 5;
+    g_remote.active.store(true, std::memory_order_release);
 
     hide_cursor();
     CGAssociateMouseAndMouseCursorPosition(false);
@@ -211,8 +212,8 @@ static void leave_remote() {
     BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)",
                return_point().x, return_point().y);
 
-    g_remote.active       = false;
     g_remote.return_guard = 10;
+    g_remote.active.store(false, std::memory_order_release);
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SHOW_CURSOR;
@@ -227,8 +228,15 @@ static void leave_remote() {
 
 // ── CGEventTap 콜백 ───────────────────────────────────────────────────
 
+// macOS 가 콜백 지연/CPU 부하로 tap 을 자동 비활성화할 수 있다. 재활성화하지 않으면 영구 먹통.
 static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
-    if (!g_remote.active) {
+    if (type == kCGEventTapDisabledByTimeout ||
+        type == kCGEventTapDisabledByUserInput) {
+        BCONN_ERROR(CAT_EVENT, "[호스트] 마우스 tap 비활성화 감지 (%u) — 재활성화", (unsigned)type);
+        CGEventTapEnable(g_mouse_tap, true);
+        return event;
+    }
+    if (!g_remote.active.load(std::memory_order_acquire)) {
         CGPoint loc = CGEventGetLocation(event);
         if (g_remote.return_guard > 0) { --g_remote.return_guard; return event; }
         if (is_at_trigger_edge(loc)) enter_remote(loc);
@@ -300,8 +308,31 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     return NULL;
 }
 
+// kill switch: Ctrl+Opt+Cmd+Esc — 원격 모드가 어떤 이유로도 풀리지 않을 때 사용자 escape hatch.
+// keycode 53 = kVK_Escape. 세 modifier 가 모두 눌려있을 때만 동작한다.
+static bool is_kill_switch(CGEventType type, CGEventRef event) {
+    if (type != kCGEventKeyDown) return false;
+    CGKeyCode kc = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    if (kc != 53) return false;
+    const CGEventFlags need = kCGEventFlagMaskControl
+                            | kCGEventFlagMaskAlternate
+                            | kCGEventFlagMaskCommand;
+    return (CGEventGetFlags(event) & need) == need;
+}
+
 static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
-    if (!g_remote.active) return event;
+    if (type == kCGEventTapDisabledByTimeout ||
+        type == kCGEventTapDisabledByUserInput) {
+        BCONN_ERROR(CAT_EVENT, "[호스트] 키보드 tap 비활성화 감지 (%u) — 재활성화", (unsigned)type);
+        CGEventTapEnable(g_key_tap, true);
+        return event;
+    }
+    if (is_kill_switch(type, event)) {
+        BCONN_INFO(CAT_CURSOR, "[호스트] kill switch 감지 — 강제 로컬 복귀");
+        if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+        return NULL;
+    }
+    if (!g_remote.active.load(std::memory_order_acquire)) return event;
 
     CGKeyCode    keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags   = CGEventGetFlags(event);
@@ -374,4 +405,22 @@ void teardown_event_taps() {
         CFRelease(g_key_tap);
         g_key_tap = nullptr;
     }
+}
+
+void force_leave_remote(const char* reason) {
+    if (!g_remote.active.load(std::memory_order_acquire)) return;
+
+    CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
+    if (!rl || rl == (CFRunLoopRef)-1) {
+        // RunLoop 이 없거나 setup 실패 — 최소한의 복구만 시도
+        BCONN_ERROR(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 폴백 (%s): RunLoop 없음", reason ? reason : "");
+        CGAssociateMouseAndMouseCursorPosition(true);
+        return;
+    }
+
+    BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 요청: %s", reason ? reason : "");
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+        if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+    });
+    CFRunLoopWakeUp(rl);
 }

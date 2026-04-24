@@ -12,16 +12,19 @@
 #pragma once
 #include "include/bconn_core.h"
 #include "protocol.h"
+#include <atomic>
 
 /// 원격 모드 상태 (bconn_core.cpp 에 인스턴스, EventTap.cpp 에서 접근)
+/// active 만 atomic — 외부 스레드(watchdog, signal, kill switch)에서 조회/복구 가능.
+/// 나머지 필드는 RunLoop 스레드의 mouse_callback 에서만 touch 한다.
 struct RemoteState {
-    bool   active       = false;
-    double virtual_x    = 0.0;  // 원격 커서의 누적 이동량 (복귀 판단용)
+    std::atomic<bool> active{false};
+    double virtual_x    = 0.0;
     double virtual_y    = 0.0;
-    double entry_x      = 0.0;  // 원격 진입 시 커서 좌표 (복귀 위치 계산용)
+    double entry_x      = 0.0;
     double entry_y      = 0.0;
-    int    entry_guard  = 0;    // 진입 직후 몇 프레임간 이벤트를 버림 (경계 오진입 방지)
-    int    return_guard = 0;    // 복귀 직후 몇 프레임간 경계 재진입 차단
+    int    entry_guard  = 0;
+    int    return_guard = 0;
 };
 
 /// 디스플레이 레이아웃을 경계(edge) 방향으로 초기화한다.
@@ -35,3 +38,8 @@ void setup_event_taps();
 
 /// 마우스/키보드 이벤트 탭을 비활성화하고 CFMachPortRef를 해제한다.
 void teardown_event_taps();
+
+/// 외부 스레드에서 원격 모드를 강제 종료한다.
+/// RunLoop 스레드로 leave_remote 를 dispatch 하여 커서/포인터 연동을 복구한다.
+/// RunLoop 이 없거나 정지 중이면 CGAssociateMouseAndMouseCursorPosition(true) 만 폴백 호출.
+void force_leave_remote(const char* reason);
