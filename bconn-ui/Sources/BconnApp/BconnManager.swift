@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import ApplicationServices
 import BconnCore
 
 @MainActor
@@ -11,9 +13,33 @@ class BconnManager: ObservableObject {
     @Published var isRunning = false
     @Published var connectedHostname: String = ""
     @Published var authFailed: Bool = false
+    @Published var hasAccessibilityPermission: Bool = false
+
+    private var permissionTimer: Timer?
 
     private init() {
         refreshLocalIPs()
+        refreshAccessibilityPermission()
+        startPermissionPolling()
+    }
+
+    /// 손쉬운 사용 권한 상태를 갱신한다. Host 모드에서 CGEventTap 이 동작하려면 필요.
+    func refreshAccessibilityPermission() {
+        hasAccessibilityPermission = AXIsProcessTrusted()
+    }
+
+    /// 시스템 설정 > 개인 정보 보호 및 보안 > 손쉬운 사용 창을 연다.
+    func openAccessibilitySettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 사용자가 시스템 설정에서 허용을 체크했는지 5초 간격으로 polling.
+    /// 허용되면 자동으로 UI 가 갱신되어 별도 조작이 필요 없다.
+    private func startPermissionPolling() {
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshAccessibilityPermission() }
+        }
     }
 
     func refreshLocalIPs() {
@@ -101,10 +127,10 @@ class BconnManager: ObservableObject {
         authFailed = false
         NotificationCenter.default.post(name: .bconnStatusChanged, object: nil)
 
-        Task.detached { [weak self] in
+        Task.detached {
             bconn_stop()
             await MainActor.run {
-                self?.start()
+                BconnManager.shared.start()
             }
         }
     }
@@ -130,6 +156,19 @@ class BconnManager: ObservableObject {
         case .error:       return .red
         case .authFailed:  return .orange
         default:           return .gray
+        }
+    }
+
+    /// 메뉴바에 노출될 SF Symbol 이름. 상태를 아이콘으로도 구분해 색맹·빠른 확인을 돕는다.
+    var menuBarSymbol: String {
+        switch status {
+        case .idle:        return "display.2"
+        case .waiting:     return "display.2"
+        case .connected:   return "display.2"
+        case .remote:      return "arrow.left.arrow.right"
+        case .error:       return "exclamationmark.triangle.fill"
+        case .authFailed:  return "lock.trianglebadge.exclamationmark.fill"
+        default:           return "display.2"
         }
     }
 }

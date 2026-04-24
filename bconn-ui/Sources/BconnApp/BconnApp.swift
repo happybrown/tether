@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct BconnApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @ObservedObject private var manager = BconnManager.shared
 
     var body: some Scene {
         // ── 설정 창 ──────────────────────────────────────────────
@@ -22,7 +23,8 @@ struct BconnApp: App {
         .commandsRemoved()
 
         // ── 메뉴바 ───────────────────────────────────────────────
-        MenuBarExtra("bconn", systemImage: "display.2") {
+        // 상태에 따라 아이콘이 바뀌므로 연결/원격/에러 여부를 메뉴바만 봐도 알 수 있다.
+        MenuBarExtra("bconn", systemImage: manager.menuBarSymbol) {
             MenuBarView()
         }
         .menuBarExtraStyle(.window)

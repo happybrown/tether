@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import BconnCore
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -15,6 +16,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installSignalHandlers()
 
         let s = AppSettings.shared
+
+        // Host 모드에서 최초 실행 시 시스템 권한 prompt 표시 (이후에는 자동으로 안 뜸).
+        // 사용자가 이 앱이 손쉬운 사용 권한을 필요로 한다는 사실을 인지하도록.
+        if s.mode == .host {
+            let options: [String: Any] = [
+                kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+            ]
+            _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        }
+        BconnManager.shared.refreshAccessibilityPermission()
+
         guard s.autoStart else { return }
         if s.mode == .host || !s.hostIP.isEmpty {
             BconnManager.shared.start()
