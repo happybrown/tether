@@ -41,14 +41,14 @@ struct MenuBarView: View {
     // ── 상태 헤더 ──────────────────────────────────────────────────────
 
     private var statusHeader: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 11) {
             ZStack {
                 Circle()
                     .fill(manager.statusColor.opacity(0.15))
-                    .frame(width: 28, height: 28)
-                Circle()
-                    .fill(manager.statusColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 30, height: 30)
+                Image(systemName: manager.statusHeaderSymbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(manager.statusColor)
             }
             .accessibilityLabel("상태: \(manager.statusLabel)")
 
@@ -61,9 +61,21 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+
+            Button { openWindow(id: "settings") } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("설정 (⌘,)")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .background(
+            manager.status == .remote
+                ? manager.statusColor.opacity(0.08) : Color.clear
+        )
     }
 
     // ── 접근성 권한 배너 (Host 모드에서만) ───────────────────────────────

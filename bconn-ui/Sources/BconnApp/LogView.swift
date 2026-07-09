@@ -1,161 +1,202 @@
 import SwiftUI
+import AppKit
 import BconnCore
 
 struct LogView: View {
     @ObservedObject private var logger = BconnLogger.shared
-    @State private var autoscroll = true
-    @State private var searchText = ""
+
+    @State private var search = ""
+    @State private var autoScroll = true
+    @State private var copiedAll = false
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
             logList
+            Divider()
+            statusBar
         }
-        .frame(minWidth: 720, minHeight: 420)
+        .frame(minWidth: 560, minHeight: 320)
     }
 
-    // ── 툴바 ────────────────────────────────────────────────────────
+    // ── 툴바 ──────────────────────────────────────────────────────────
 
     private var toolbar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Picker("레벨", selection: $logger.minLevel) {
-                Text("DEBUG").tag(BCONN_LOG_DEBUG)
+                Text("전체").tag(BCONN_LOG_DEBUG)
                 Text("INFO").tag(BCONN_LOG_INFO)
                 Text("ERROR").tag(BCONN_LOG_ERROR)
             }
             .pickerStyle(.segmented)
-            .frame(width: 200)
             .labelsHidden()
+            .frame(width: 180)
 
             searchField
-                .frame(maxWidth: 240)
 
-            Toggle("파일 저장", isOn: $logger.fileLoggingEnabled)
-                .toggleStyle(.checkbox)
-                .help("활성화하면 이후 로그를 디스크에 기록합니다")
+            Spacer(minLength: 8)
 
-            if let url = logger.logFileURL {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .buttonStyle(.borderless)
-                .help("로그 파일: \(url.path)")
+            Toggle(isOn: $autoScroll) {
+                Label("자동 스크롤", systemImage: "arrow.down.to.line")
             }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help("새 로그가 오면 맨 아래로 따라갑니다")
 
-            Spacer()
+            Toggle(isOn: $logger.fileLoggingEnabled) {
+                Label("파일 저장", systemImage: "square.and.arrow.down")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help("로그를 ~/Library/Logs/Bconn 에 저장합니다")
 
-            Button {
-                copyVisibleLogs()
+            Menu {
+                Button("전체 복사") { copyAll() }
+                Button("로그 폴더 열기") { revealLogFolder() }
+                    .disabled(logger.logFileURL == nil)
+                Divider()
+                Button("지우기", role: .destructive) { logger.clear() }
             } label: {
-                Image(systemName: "doc.on.doc")
+                Image(systemName: "ellipsis.circle")
             }
-            .buttonStyle(.borderless)
-            .help("표시된 로그를 클립보드에 복사")
-
-            Toggle("자동 스크롤", isOn: $autoscroll)
-                .toggleStyle(.checkbox)
-
-            Button("지우기") { logger.clear() }
-                .buttonStyle(.borderless)
+            .menuStyle(.borderlessButton)
+            .frame(width: 28)
+            .help("더보기")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
                 .font(.system(size: 11))
-            TextField("메시지 검색", text: $searchText)
+                .foregroundStyle(.secondary)
+            TextField("검색", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
+            if !search.isEmpty {
+                Button { search = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
                         .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.gray.opacity(0.12))
+        .background(Color.primary.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(maxWidth: 240)
     }
 
-    // ── 필터링 ──────────────────────────────────────────────────────
+    // ── 로그 목록 ──────────────────────────────────────────────────────
 
     private var visibleEntries: [LogEntry] {
         let base = logger.filtered
-        guard !searchText.isEmpty else { return base }
-        let needle = searchText
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return base }
         return base.filter {
-            $0.message.localizedCaseInsensitiveContains(needle) ||
-            $0.category.localizedCaseInsensitiveContains(needle)
+            $0.message.lowercased().contains(q) || $0.category.lowercased().contains(q)
         }
     }
 
-    // ── 로그 목록 ────────────────────────────────────────────────────
-
     private var logList: some View {
         ScrollViewReader { proxy in
-            Group {
-                if visibleEntries.isEmpty {
-                    emptyState
-                } else {
-                    List(visibleEntries) { entry in
-                        LogRow(entry: entry)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(visibleEntries.enumerated()), id: \.element.id) { idx, entry in
+                        LogRow(entry: entry, zebra: idx % 2 == 1)
                             .id(entry.id)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(.init(top: 1, leading: 8, bottom: 1, trailing: 8))
                     }
-                    .listStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
-                    .onChange(of: visibleEntries.count) { _ in
-                        if autoscroll, let last = visibleEntries.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+                }
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .overlay(alignment: .center) {
+                if visibleEntries.isEmpty { emptyState }
+            }
+            .onChange(of: logger.entries.count) { _ in
+                guard autoScroll, let last = visibleEntries.last else { return }
+                withAnimation(.linear(duration: 0.1)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
+        VStack(spacing: 6) {
+            Image(systemName: search.isEmpty ? "text.append" : "magnifyingglass")
                 .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(searchText.isEmpty ? "로그 없음" : "검색 결과 없음")
-                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+            Text(search.isEmpty ? "로그가 없습니다" : "검색 결과 없음")
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func copyVisibleLogs() {
-        let fmt = ISO8601DateFormatter()
-        let text = visibleEntries.map { entry in
-            "\(fmt.string(from: entry.date)) [\(entry.levelLabel)] [\(entry.category)] \(entry.message)"
-        }.joined(separator: "\n")
+    // ── 하단 상태바 ────────────────────────────────────────────────────
 
+    private var statusBar: some View {
+        HStack(spacing: 8) {
+            Text("\(visibleEntries.count)개")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            if !search.isEmpty || logger.minLevel != BCONN_LOG_DEBUG {
+                Text("· 필터됨").font(.system(size: 11)).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            if copiedAll {
+                Label("복사됨", systemImage: "checkmark")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.green)
+            }
+            if logger.fileLoggingEnabled, let url = logger.logFileURL {
+                Button { revealLogFolder() } label: {
+                    Label(url.lastPathComponent, systemImage: "doc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .buttonStyle(.plain)
+                .help("로그 파일 위치 열기")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    // ── 액션 ──────────────────────────────────────────────────────────
+
+    private func copyAll() {
+        let fmt = LogRow.timeFormatter
+        let text = visibleEntries.map {
+            "\(fmt.string(from: $0.date)) [\($0.levelLabel)] [\($0.category)] \($0.message)"
+        }.joined(separator: "\n")
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        copiedAll = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedAll = false }
+    }
+
+    private func revealLogFolder() {
+        let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/Bconn", isDirectory: true)
+        NSWorkspace.shared.open(dir)
     }
 }
 
+// ── 로그 행 ────────────────────────────────────────────────────────────
+
 private struct LogRow: View {
     let entry: LogEntry
+    let zebra: Bool
 
-    private static let timeFmt: DateFormatter = {
+    static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         return f
@@ -163,30 +204,38 @@ private struct LogRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(Self.timeFmt.string(from: entry.date))
+            Text(Self.timeFormatter.string(from: entry.date))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 90, alignment: .leading)
+                .frame(width: 78, alignment: .leading)
 
             Text(entry.levelLabel)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(levelColor)
-                .frame(width: 44, alignment: .leading)
+                .frame(width: 42, alignment: .leading)
 
-            Text("[\(entry.category)]")
+            Text(entry.category)
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
+                .frame(width: 60, alignment: .leading)
 
             Text(entry.message)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+        .background(zebra ? Color.primary.opacity(0.035) : Color.clear)
     }
 
     private var levelColor: Color {
         switch entry.level {
+        case BCONN_LOG_DEBUG: return .secondary
+        case BCONN_LOG_INFO:  return .blue
         case BCONN_LOG_ERROR: return .red
-        case BCONN_LOG_INFO:  return .primary
-        default:              return .secondary
+        default:              return .primary
         }
     }
 }

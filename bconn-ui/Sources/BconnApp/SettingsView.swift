@@ -18,6 +18,9 @@ struct SettingsView: View {
                     connectionSection
                     networkSection
                     securitySection
+                    if settings.mode == .host {
+                        shortcutSection
+                    }
                     generalSection
                 }
                 .padding(24)
@@ -25,21 +28,26 @@ struct SettingsView: View {
 
             // ── 하단 상태바 + 버튼 ────────────────────────────────
             Divider()
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(manager.statusColor)
-                    .frame(width: 8, height: 8)
-                Text(manager.statusLabel)
+            HStack(spacing: 8) {
+                Image(systemName: manager.statusHeaderSymbol)
                     .font(.system(size: 12))
+                    .foregroundStyle(manager.statusColor)
+                Text(manager.statusLabel)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if manager.isRunning {
-                    Button("중지") { manager.stop() }
-                        .keyboardShortcut(.escape, modifiers: [])
+                    Button(role: .destructive) { manager.stop() } label: {
+                        Label("중지", systemImage: "stop.fill")
+                    }
+                    .keyboardShortcut(.escape, modifiers: [])
                 } else {
-                    Button("시작") { manager.start() }
-                        .keyboardShortcut(.return, modifiers: [])
-                        .disabled(!canStart)
+                    Button { manager.start() } label: {
+                        Label("시작", systemImage: "play.fill")
+                    }
+                    .keyboardShortcut(.return, modifiers: [])
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canStart)
                 }
             }
             .padding(.horizontal, 24)
@@ -59,7 +67,7 @@ struct SettingsView: View {
     // ── 모드 ──────────────────────────────────────────────────────
 
     private var modeSection: some View {
-        FormSection(title: "모드") {
+        FormSection(title: "모드", icon: "person.2") {
             VStack(spacing: 0) {
                 FormRow(label: "역할") {
                     Picker("", selection: $settings.mode) {
@@ -115,7 +123,8 @@ struct SettingsView: View {
     // ── 연결 설정 ─────────────────────────────────────────────────
 
     private var connectionSection: some View {
-        FormSection(title: settings.mode == .host ? "Host 설정" : "Client 설정") {
+        FormSection(title: settings.mode == .host ? "Host 설정" : "Client 설정",
+                    icon: settings.mode == .host ? "desktopcomputer" : "laptopcomputer") {
             VStack(spacing: 0) {
                 if settings.mode == .host {
                     FormRow(label: "내 IP 주소") {
@@ -155,7 +164,7 @@ struct SettingsView: View {
     // ── 네트워크 ──────────────────────────────────────────────────
 
     private var networkSection: some View {
-        FormSection(title: "네트워크") {
+        FormSection(title: "네트워크", icon: "network") {
             VStack(spacing: 0) {
                 FormRow(label: "포트") {
                     VStack(alignment: .trailing, spacing: 4) {
@@ -199,7 +208,7 @@ struct SettingsView: View {
     // ── 보안 ──────────────────────────────────────────────────────
 
     private var securitySection: some View {
-        FormSection(title: "보안") {
+        FormSection(title: "보안", icon: "lock") {
             FormRow(label: "공유 암호") {
                 VStack(alignment: .trailing, spacing: 4) {
                     SecureField("비어있으면 인증 없음", text: $settings.psk)
@@ -217,7 +226,7 @@ struct SettingsView: View {
     // ── 일반 ──────────────────────────────────────────────────────
 
     private var generalSection: some View {
-        FormSection(title: "일반") {
+        FormSection(title: "일반", icon: "slider.horizontal.3") {
             VStack(spacing: 0) {
                 FormToggleRow(
                     label: "로그인 시 자동 실행",
@@ -232,6 +241,26 @@ struct SettingsView: View {
                     label: "앱 실행 시 자동 연결",
                     description: "앱이 시작되면 저장된 설정으로 세션을 바로 시작합니다",
                     isOn: $settings.autoStart
+                )
+            }
+        }
+    }
+
+    // ── 단축키 ────────────────────────────────────────────────────
+
+    private var shortcutSection: some View {
+        FormSection(title: "단축키 (Host 모드)", icon: "keyboard") {
+            VStack(spacing: 0) {
+                ShortcutRow(
+                    keys: ["⌘", "Esc"],
+                    label: "로컬 강제 복귀",
+                    description: "원격 모드에서 호스트로 즉시 복귀합니다"
+                )
+                Divider().padding(.leading, 16)
+                ShortcutRow(
+                    keys: ["⌘", "⇧", "Esc"],
+                    label: "세션 강제 중지",
+                    description: "완전히 먹통이 됐을 때 세션 전체를 종료합니다"
                 )
             }
         }
@@ -268,16 +297,23 @@ struct SettingsView: View {
 
 private struct FormSection<Content: View>: View {
     let title: String
+    var icon: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.5)
-                .padding(.leading, 4)
+            HStack(spacing: 5) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
 
             content()
                 .background(.background)
@@ -303,6 +339,40 @@ private struct FormRow<Content: View>: View {
                 .font(.system(size: 13))
             Spacer(minLength: 16)
             content()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+}
+
+// ── 단축키 행 ──────────────────────────────────────────────────────
+
+private struct ShortcutRow: View {
+    let keys: [String]
+    let label: String
+    let description: String
+
+    var body: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.system(size: 13))
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 16)
+            HStack(spacing: 3) {
+                ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                    Text(key)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5)
+                            .stroke(Color.primary.opacity(0.15), lineWidth: 1))
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

@@ -16,11 +16,20 @@ class BconnManager: ObservableObject {
     @Published var hasAccessibilityPermission: Bool = false
 
     private var permissionTimer: Timer?
+    private var clipboardTimer: Timer?
+    // 마지막으로 전송한 클립보드 내용 (중복 전송 방지)
+    private var lastSentClipboard: String = ""
+    // 마지막으로 수신한 클립보드 내용 (루프 방지)
+    private var lastReceivedClipboard: String = ""
+    // NSPasteboard changeCount 기반 변경 감지 (폴링 효율화)
+    private var lastChangeCount: Int = 0
 
     private init() {
         refreshLocalIPs()
         refreshAccessibilityPermission()
         startPermissionPolling()
+        registerClipboardCallback()
+        registerForceStopCallback()
     }
 
     /// 손쉬운 사용 권한 상태를 갱신한다. Host 모드에서 CGEventTap 이 동작하려면 필요.
@@ -100,9 +109,90 @@ class BconnManager: ObservableObject {
 
         isRunning = true
         status = bconn_get_status()
+        startClipboardPolling()
+    }
+
+    // MARK: - Escape Shortcuts
+
+    /// Cmd+Shift+Esc 감지 시 세션을 강제 중지한다.
+    /// CGEventTap RunLoop 스레드에서 호출되므로 Task.detached 로 비동기 처리한다.
+    private func registerForceStopCallback() {
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        bconn_set_force_stop_callback({ ctx in
+            guard let ctx else { return }
+            let manager = Unmanaged<BconnManager>.fromOpaque(ctx).takeUnretainedValue()
+            Task.detached {
+                await MainActor.run { manager.stop() }
+            }
+        }, selfPtr)
+    }
+
+    // MARK: - Clipboard Sharing
+
+    /// C++ 쪽에서 클립보드 수신 시 호출될 콜백을 등록한다.
+    private func registerClipboardCallback() {
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        bconn_set_clipboard_callback({ data, len, ctx in
+            guard let data, let ctx else { return }
+            let manager = Unmanaged<BconnManager>.fromOpaque(ctx).takeUnretainedValue()
+            let text = String(bytes: UnsafeBufferPointer(start: data, count: Int(len)),
+                              encoding: .utf8) ?? ""
+            guard !text.isEmpty else { return }
+            DispatchQueue.main.async {
+                manager.applyReceivedClipboard(text)
+            }
+        }, selfPtr)
+    }
+
+    private func applyReceivedClipboard(_ text: String) {
+        guard text != lastReceivedClipboard else { return }
+        lastReceivedClipboard = text
+        // 로컬 클립보드에 적용 (이 값을 다시 감지해 전송하지 않도록 lastSentClipboard 도 갱신)
+        lastSentClipboard = text
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        // changeCount를 갱신해 다음 폴링에서 자체 변경을 무시
+        lastChangeCount = NSPasteboard.general.changeCount
+    }
+
+    /// 연결된 동안 클립보드를 0.5초 간격으로 폴링해 변경 시 상대방에 전송한다.
+    private func startClipboardPolling() {
+        stopClipboardPolling()
+        lastSentClipboard = NSPasteboard.general.string(forType: .string) ?? ""
+        lastChangeCount = NSPasteboard.general.changeCount
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollAndSendClipboard() }
+        }
+    }
+
+    private func stopClipboardPolling() {
+        clipboardTimer?.invalidate()
+        clipboardTimer = nil
+    }
+
+    private func pollAndSendClipboard() {
+        guard isRunning else { return }
+        // changeCount가 바뀌지 않았으면 내용 비교 없이 스킵 (효율화)
+        let currentCount = NSPasteboard.general.changeCount
+        guard currentCount != lastChangeCount else { return }
+        lastChangeCount = currentCount
+
+        let current = NSPasteboard.general.string(forType: .string) ?? ""
+        guard !current.isEmpty,
+              current != lastSentClipboard,
+              current != lastReceivedClipboard else { return }
+
+        lastSentClipboard = current
+        guard let data = current.data(using: .utf8) else { return }
+        data.withUnsafeBytes { ptr in
+            if let base = ptr.bindMemory(to: UInt8.self).baseAddress {
+                bconn_send_clipboard(base, UInt32(data.count))
+            }
+        }
     }
 
     func stop() {
+        stopClipboardPolling()
         isRunning = false
         status = .idle
         statusMessage = "중지됨"
@@ -110,16 +200,17 @@ class BconnManager: ObservableObject {
         authFailed = false
         NotificationCenter.default.post(name: .bconnStatusChanged, object: nil)
 
-        // bconn_stop()은 내부 스레드(run_loop_thread, heartbeat_thread)를 join하므로
-        // 메인 스레드에서 직접 호출하면 set_status 콜백의 DispatchQueue.main.async와
-        // 데드락이 발생한다. 백그라운드에서 실행한다.
-        Task.detached { bconn_stop() }
+        // bconn_stop()은 진입 직후 g_cb=nullptr로 콜백을 해제하므로
+        // set_status→DispatchQueue.main.async 데드락은 발생하지 않는다.
+        // 동기 호출하여 앱 종료 시 C++ 스레드가 확실히 join되도록 한다.
+        bconn_stop()
     }
 
     /// 재시작 시 stop 과 start 가 race 하지 않도록 완료 대기.
     /// C++ 측 g_lifecycle_mu 가 실제 상호 배제를 수행하지만, 여기서는 main thread 가
     /// 잠시라도 block 되는 걸 피하기 위해 background 에서 순차 실행한다.
     func restart() {
+        stopClipboardPolling()
         isRunning = false
         status = .idle
         statusMessage = "재시작 중..."
@@ -159,16 +250,30 @@ class BconnManager: ObservableObject {
         }
     }
 
-    /// 메뉴바에 노출될 SF Symbol 이름. 상태를 아이콘으로도 구분해 색맹·빠른 확인을 돕는다.
+    /// 메뉴바에 노출될 SF Symbol 이름. 상태를 아이콘 모양으로 구분해 빠른 확인을 돕는다.
+    /// 모든 이름은 실제 존재하는 SF Symbol 이어야 한다 (없는 이름은 빈 아이콘으로 렌더됨).
     var menuBarSymbol: String {
         switch status {
         case .idle:        return "display.2"
-        case .waiting:     return "display.2"
-        case .connected:   return "display.2"
-        case .remote:      return "arrow.left.arrow.right"
+        case .waiting:     return "display.2"              // 대기: 기본 아이콘
+        case .connected:   return "display.2"              // 연결: 기본 아이콘
+        case .remote:      return "arrow.left.arrow.right" // 원격: 화살표로 전환 상태 표시
         case .error:       return "exclamationmark.triangle.fill"
         case .authFailed:  return "lock.trianglebadge.exclamationmark.fill"
         default:           return "display.2"
+        }
+    }
+
+    /// 팝오버 상태 헤더에 표시할 SF Symbol. 상태를 아이콘으로도 구분한다.
+    var statusHeaderSymbol: String {
+        switch status {
+        case .idle:        return "pause.circle.fill"
+        case .waiting:     return "clock.fill"
+        case .connected:   return "checkmark.circle.fill"
+        case .remote:      return "arrow.left.arrow.right.circle.fill"
+        case .error:       return "exclamationmark.triangle.fill"
+        case .authFailed:  return "lock.trianglebadge.exclamationmark.fill"
+        default:           return "circle.fill"
         }
     }
 }
