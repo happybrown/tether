@@ -5,10 +5,11 @@
 #include "EventTap.h"
 #include "NetworkEngine.h"
 #include "BconnLog.h"
+#include "CursorUtil.h"
 #include <ApplicationServices/ApplicationServices.h>
-#include <objc/objc-runtime.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <vector>
 #include <cstring>
 
@@ -22,20 +23,11 @@ extern std::atomic<int32_t>     g_client_width;
 extern std::atomic<int32_t>     g_client_height;
 extern RemoteState              g_remote;
 extern std::atomic<CFRunLoopRef> g_run_loop;
+extern std::atomic<bool>        g_taps_active;
 
 void set_status(BconnStatus s, const char* msg);
 
-// ── 커서 유틸 ─────────────────────────────────────────────────────────
 
-static void hide_cursor() {
-    id cls = (id)objc_getClass("NSCursor");
-    ((void(*)(id,SEL))objc_msgSend)(cls, sel_registerName("hide"));
-}
-
-static void show_cursor() {
-    id cls = (id)objc_getClass("NSCursor");
-    ((void(*)(id,SEL))objc_msgSend)(cls, sel_registerName("unhide"));
-}
 
 // ── 디스플레이 레이아웃 ──────────────────────────────────────────────
 
@@ -137,6 +129,27 @@ static bool is_at_trigger_edge(CGPoint loc) {
     return false;
 }
 
+/// 진입 좌표가 속한 경계 디스플레이를 반환한다. 못 찾으면 전체 레이아웃을 대체로 반환.
+/// 진입/복귀 비율을 이 모니터 기준으로 계산해 클라이언트 화면과 일관되게 매핑한다.
+static CGRect edge_display_at(CGPoint loc) {
+    for (const CGRect& b : g_layout.edge_displays) {
+        bool in_range = false;
+        switch (g_cfg.client_edge) {
+        case BCONN_EDGE_RIGHT:
+        case BCONN_EDGE_LEFT:
+            in_range = (loc.y >= b.origin.y && loc.y <= b.origin.y + b.size.height);
+            break;
+        case BCONN_EDGE_TOP:
+        case BCONN_EDGE_BOTTOM:
+            in_range = (loc.x >= b.origin.x && loc.x <= b.origin.x + b.size.width);
+            break;
+        }
+        if (in_range) return b;
+    }
+    return CGRectMake(g_layout.left, g_layout.top,
+                      g_layout.right - g_layout.left, g_layout.height);
+}
+
 // ── 원격 모드 상태 ────────────────────────────────────────────────────
 
 // RemoteState 정의는 EventTap.h 에 있다.
@@ -155,42 +168,72 @@ static CGPoint offscreen_point() {
 }
 
 /// 복귀 시 커서를 경계 안쪽 50px 지점으로 되돌린다.
+/// 경계와 평행한 축 좌표(return_x/return_y)는 클라이언트가 보낸 복귀 비율로 정해진다.
 static CGPoint return_point() {
     const double offset = 50.0;
     switch (g_cfg.client_edge) {
-    case BCONN_EDGE_RIGHT:  return CGPointMake(g_layout.trigger_edge - offset, g_remote.entry_y);
-    case BCONN_EDGE_LEFT:   return CGPointMake(g_layout.trigger_edge + offset, g_remote.entry_y);
-    case BCONN_EDGE_TOP:    return CGPointMake(g_remote.entry_x, g_layout.trigger_edge + offset);
-    case BCONN_EDGE_BOTTOM: return CGPointMake(g_remote.entry_x, g_layout.trigger_edge - offset);
+    case BCONN_EDGE_RIGHT:  return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
+    case BCONN_EDGE_LEFT:   return CGPointMake(g_layout.trigger_edge + offset, g_remote.return_y);
+    case BCONN_EDGE_TOP:    return CGPointMake(g_remote.return_x, g_layout.trigger_edge + offset);
+    case BCONN_EDGE_BOTTOM: return CGPointMake(g_remote.return_x, g_layout.trigger_edge - offset);
     }
-    return CGPointMake(g_layout.trigger_edge - offset, g_remote.entry_y);
+    return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
+}
+
+/// 클라이언트가 보낸 복귀 비율(0~1)을 host 화면 좌표로 변환해 return_x/return_y 에 저장한다.
+/// 진입했던 경계 모니터(entry_display) 기준으로 역변환해 진입/복귀 축을 일치시킨다.
+/// RIGHT/LEFT 진입은 세로 비율 → return_y, TOP/BOTTOM 진입은 가로 비율 → return_x.
+static void set_return_from_ratio(double ratio) {
+    ratio = std::clamp(ratio, 0.0, 1.0);
+    const CGRect& d = g_remote.entry_display;
+    switch (g_cfg.client_edge) {
+    case BCONN_EDGE_RIGHT:
+    case BCONN_EDGE_LEFT:
+        g_remote.return_y = d.origin.y + ratio * d.size.height;
+        break;
+    case BCONN_EDGE_TOP:
+    case BCONN_EDGE_BOTTOM:
+        g_remote.return_x = d.origin.x + ratio * d.size.width;
+        break;
+    }
 }
 
 static void enter_remote(CGPoint loc) {
-    g_remote.virtual_x   = 0.0;
-    g_remote.virtual_y   = 0.0;
+    // peer가 연결되어 있지 않으면 원격 모드 진입을 차단한다.
+    // 연결 끊김 상태에서 경계 진입 시 먹통 방지.
+    if (!g_engine || !g_engine->is_peer_known()) {
+        BCONN_DEBUG(CAT_CURSOR, "[호스트] 원격 모드 진입 차단: peer 미연결");
+        return;
+    }
+
     g_remote.entry_x     = loc.x;
     g_remote.entry_y     = loc.y;
-    g_remote.entry_guard = 5;
+    // 복귀 좌표 기본값을 진입 위치로 둔다. 클라이언트 복귀 패킷이 오면 그 비율로 갱신된다.
+    g_remote.return_x    = loc.x;
+    g_remote.return_y    = loc.y;
+    // 진입한 경계 모니터를 기억한다 — 진입/복귀 비율의 기준 좌표계.
+    g_remote.entry_display = edge_display_at(loc);
+    g_remote.entry_guard = 10;
     g_remote.active.store(true, std::memory_order_release);
 
-    hide_cursor();
+    bconn_hide_cursor();
     CGAssociateMouseAndMouseCursorPosition(false);
     CGWarpMouseCursorPosition(offscreen_point());
 
-    // 진입 위치 비율: 클라이언트가 화면 어느 지점에 커서를 올릴지 결정
+    // 진입 위치 비율: 진입한 경계 모니터 기준으로 계산해 클라이언트 화면과 대응시킨다.
+    const CGRect& d = g_remote.entry_display;
     double ratio = 0.5;
     switch (g_cfg.client_edge) {
     case BCONN_EDGE_RIGHT:
     case BCONN_EDGE_LEFT:
-        ratio = (g_layout.height > 0)
-            ? std::clamp((loc.y - g_layout.top) / g_layout.height, 0.0, 1.0)
+        ratio = (d.size.height > 0)
+            ? std::clamp((loc.y - d.origin.y) / d.size.height, 0.0, 1.0)
             : 0.5;
         break;
     case BCONN_EDGE_TOP:
     case BCONN_EDGE_BOTTOM:
-        ratio = (g_layout.right - g_layout.left > 0)
-            ? std::clamp((loc.x - g_layout.left) / (g_layout.right - g_layout.left), 0.0, 1.0)
+        ratio = (d.size.width > 0)
+            ? std::clamp((loc.x - d.origin.x) / d.size.width, 0.0, 1.0)
             : 0.5;
         break;
     }
@@ -209,19 +252,24 @@ static void enter_remote(CGPoint loc) {
 }
 
 static void leave_remote() {
-    BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)",
-               return_point().x, return_point().y);
+    CGPoint rp = return_point();
+    BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)", rp.x, rp.y);
 
-    g_remote.return_guard = 10;
+    // 커서 복귀 + 연동 복구를 active=false 보다 먼저 수행한다.
+    // CGWarp/CGAssociate 는 비동기 Mach 메시지라 실제 반영까지 수십ms 지연이 있다.
+    // active=false 이후 들어오는 클릭이 offscreen 위치에 dispatch되는 것을 막기 위해
+    // 시스템에 먼저 전달해 둔다.
+    CGWarpMouseCursorPosition(rp);
+    CGAssociateMouseAndMouseCursorPosition(true);
+    bconn_show_cursor();
+
+    // 복귀 시각 기록 — mouse_callback 에서 200ms 동안 재진입을 차단한다.
+    g_remote.return_time = std::chrono::steady_clock::now();
     g_remote.active.store(false, std::memory_order_release);
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SHOW_CURSOR;
     g_engine->send_mouse(pkt);
-
-    CGWarpMouseCursorPosition(return_point());
-    CGAssociateMouseAndMouseCursorPosition(true);
-    show_cursor();
 
     set_status(BCONN_STATUS_CONNECTED, "연결됨");
 }
@@ -237,8 +285,17 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         return event;
     }
     if (!g_remote.active.load(std::memory_order_acquire)) {
+        // 복귀 직후 200ms 동안 재진입을 차단한다.
+        auto elapsed = std::chrono::steady_clock::now() - g_remote.return_time;
+        if (elapsed < std::chrono::milliseconds(200)) return event;
+
+        // 드래그 중에는 원격 진입 차단 — 의도치 않은 전환 방지
+        bool is_drag = (type == kCGEventLeftMouseDragged  ||
+                        type == kCGEventRightMouseDragged ||
+                        type == kCGEventOtherMouseDragged);
+        if (is_drag) return event;
+
         CGPoint loc = CGEventGetLocation(event);
-        if (g_remote.return_guard > 0) { --g_remote.return_guard; return event; }
         if (is_at_trigger_edge(loc)) enter_remote(loc);
         return event;
     }
@@ -256,35 +313,10 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         BCONN_DEBUG(CAT_EVENT, "[호스트] 클릭 전송: type=%u entry_guard=%d", (unsigned)type, g_remote.entry_guard);
     }
 
+    // 진입 직후 몇 이벤트는 host 잔여 delta 이므로 client 로 보내지 않는다.
+    // 복귀 판정은 실제 커서 위치를 아는 client 가 EVENT_LEAVE_REMOTE 로 알려준다.
     if (!is_click && !is_scroll) {
         if (g_remote.entry_guard > 0) { --g_remote.entry_guard; return NULL; }
-
-        int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-        int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-
-        // 방향에 따라 복귀 판단 축이 다름
-        switch (g_cfg.client_edge) {
-        case BCONN_EDGE_RIGHT:
-            g_remote.virtual_x = std::min(g_remote.virtual_x + dx,
-                                          (double)g_client_width.load(std::memory_order_relaxed));
-            if (g_remote.virtual_x <= 0.0) { leave_remote(); return NULL; }
-            break;
-        case BCONN_EDGE_LEFT:
-            g_remote.virtual_x = std::max(g_remote.virtual_x + dx,
-                                          -(double)g_client_width.load(std::memory_order_relaxed));
-            if (g_remote.virtual_x >= 0.0) { leave_remote(); return NULL; }
-            break;
-        case BCONN_EDGE_BOTTOM:
-            g_remote.virtual_y = std::min(g_remote.virtual_y + dy,
-                                          (double)g_client_height.load(std::memory_order_relaxed));
-            if (g_remote.virtual_y <= 0.0) { leave_remote(); return NULL; }
-            break;
-        case BCONN_EDGE_TOP:
-            g_remote.virtual_y = std::max(g_remote.virtual_y + dy,
-                                          -(double)g_client_height.load(std::memory_order_relaxed));
-            if (g_remote.virtual_y >= 0.0) { leave_remote(); return NULL; }
-            break;
-        }
     }
 
     MousePacket pkt{};
@@ -308,16 +340,34 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     return NULL;
 }
 
-// kill switch: Ctrl+Opt+Cmd+Esc — 원격 모드가 어떤 이유로도 풀리지 않을 때 사용자 escape hatch.
-// keycode 53 = kVK_Escape. 세 modifier 가 모두 눌려있을 때만 동작한다.
-static bool is_kill_switch(CGEventType type, CGEventRef event) {
+// escape 단축키 감지
+// Cmd+Esc          → 원격 모드 강제 복귀 (로컬 복귀)
+// Cmd+Shift+Esc    → 세션 전체 강제 중지 (C++ 콜백 → Swift bconn_stop)
+// keycode 53 = kVK_Escape
+static bool is_escape_shortcut(CGEventType type, CGEventRef event, bool* out_stop_session) {
     if (type != kCGEventKeyDown) return false;
     CGKeyCode kc = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     if (kc != 53) return false;
-    const CGEventFlags need = kCGEventFlagMaskControl
-                            | kCGEventFlagMaskAlternate
-                            | kCGEventFlagMaskCommand;
-    return (CGEventGetFlags(event) & need) == need;
+    CGEventFlags flags = CGEventGetFlags(event) & kCGEventFlagMaskNonCoalesced;
+    (void)flags; // non-coalesced 마스크는 아래에서 별도 처리
+    CGEventFlags f = CGEventGetFlags(event);
+    bool cmd   = (f & kCGEventFlagMaskCommand) != 0;
+    bool shift = (f & kCGEventFlagMaskShift)   != 0;
+    bool ctrl  = (f & kCGEventFlagMaskControl) != 0;
+    bool alt   = (f & kCGEventFlagMaskAlternate) != 0;
+    if (!cmd) return false;
+    // Cmd+Esc (다른 modifier 없음) → 원격 복귀
+    if (!shift && !ctrl && !alt) { *out_stop_session = false; return true; }
+    // Cmd+Shift+Esc (다른 modifier 없음) → 세션 중지
+    if (shift && !ctrl && !alt)  { *out_stop_session = true;  return true; }
+    return false;
+}
+
+// 세션 강제 중지 콜백 — Swift 에서 등록, CGEventTap 콜백에서 호출
+static std::function<void()> g_force_stop_cb;
+
+void set_force_stop_cb(std::function<void()> cb) {
+    g_force_stop_cb = std::move(cb);
 }
 
 static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
@@ -327,9 +377,16 @@ static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRe
         CGEventTapEnable(g_key_tap, true);
         return event;
     }
-    if (is_kill_switch(type, event)) {
-        BCONN_INFO(CAT_CURSOR, "[호스트] kill switch 감지 — 강제 로컬 복귀");
-        if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+    bool stop_session = false;
+    if (is_escape_shortcut(type, event, &stop_session)) {
+        if (stop_session) {
+            BCONN_INFO(CAT_CURSOR, "[호스트] Cmd+Shift+Esc — 세션 강제 중지");
+            if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+            if (g_force_stop_cb) g_force_stop_cb();
+        } else {
+            BCONN_INFO(CAT_CURSOR, "[호스트] Cmd+Esc — 강제 로컬 복귀");
+            if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+        }
         return NULL;
     }
     if (!g_remote.active.load(std::memory_order_acquire)) return event;
@@ -345,6 +402,25 @@ static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRe
                    :                             EVENT_FLAGS_CHANGE;
     g_engine->send_key(pkt);
     return NULL;
+}
+
+// ── 디스플레이 재설정 감지 ────────────────────────────────────────────
+
+static void display_reconfiguration_callback(CGDirectDisplayID display,
+                                              CGDisplayChangeSummaryFlags flags,
+                                              void* /*userInfo*/) {
+    // kCGDisplayAddFlag / kCGDisplayRemoveFlag: 모니터 연결/해제
+    // kCGDisplayMovedFlag / kCGDisplaySetMainFlag: 배치 변경
+    if (flags & (kCGDisplayAddFlag | kCGDisplayRemoveFlag |
+                 kCGDisplayMovedFlag | kCGDisplaySetMainFlag)) {
+        BCONN_INFO(CAT_CURSOR, "[호스트] 디스플레이 재설정 감지 (display=%u, flags=0x%x) — 레이아웃 갱신",
+                   display, flags);
+        // 원격 모드 중이면 먼저 복귀 — 경계가 바뀌면 기존 가상 좌표가 무의미
+        if (g_remote.active.load(std::memory_order_acquire)) {
+            force_leave_remote("디스플레이 재설정");
+        }
+        refresh_layout(g_cfg.client_edge);
+    }
 }
 
 // ── RunLoop 기반 이벤트 탭 설정/해제 ─────────────────────────────────
@@ -391,10 +467,16 @@ void setup_event_taps() {
     add_tap(g_mouse_tap);
     add_tap(g_key_tap);
 
+    // 디스플레이 핫플러그 감지 등록
+    CGDisplayRegisterReconfigurationCallback(display_reconfiguration_callback, nullptr);
+
+    g_taps_active.store(true, std::memory_order_release);
     BCONN_INFO(CAT_EVENT, "[호스트] 이벤트 탭 설정 완료");
 }
 
 void teardown_event_taps() {
+    g_taps_active.store(false, std::memory_order_release);
+    CGDisplayRemoveReconfigurationCallback(display_reconfiguration_callback, nullptr);
     if (g_mouse_tap) {
         CGEventTapEnable(g_mouse_tap, false);
         CFRelease(g_mouse_tap);
@@ -412,15 +494,39 @@ void force_leave_remote(const char* reason) {
 
     CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
     if (!rl || rl == (CFRunLoopRef)-1) {
-        // RunLoop 이 없거나 setup 실패 — 최소한의 복구만 시도
+        // RunLoop 이 없거나 setup 실패 — 최대한 복구 시도
         BCONN_ERROR(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 폴백 (%s): RunLoop 없음", reason ? reason : "");
         CGAssociateMouseAndMouseCursorPosition(true);
+        bconn_show_cursor();
+        g_remote.return_time = std::chrono::steady_clock::now();
+        g_remote.active.store(false, std::memory_order_release);
+
+        // 커서를 화면 중앙으로 이동
+        CGDirectDisplayID main_id = CGMainDisplayID();
+        CGRect b = CGDisplayBounds(main_id);
+        CGWarpMouseCursorPosition(CGPointMake(b.origin.x + b.size.width * 0.5,
+                                              b.origin.y + b.size.height * 0.5));
         return;
     }
 
     BCONN_INFO(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 요청: %s", reason ? reason : "");
     CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
         if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+    });
+    CFRunLoopWakeUp(rl);
+}
+
+void request_leave_remote(double ratio) {
+    if (!g_remote.active.load(std::memory_order_acquire)) return;
+
+    CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
+    if (!rl || rl == (CFRunLoopRef)-1) { force_leave_remote("복귀 요청(RunLoop 없음)"); return; }
+
+    // 복귀 좌표 계산과 leave_remote 를 RunLoop 스레드에서 수행해 g_layout/커서 접근을 일원화한다.
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+        if (!g_remote.active.load(std::memory_order_acquire)) return;
+        set_return_from_ratio(ratio);
+        leave_remote();
     });
     CFRunLoopWakeUp(rl);
 }

@@ -31,6 +31,9 @@ struct ClientState {
     double cur_y      = 0;
     bool pos_init      = false; // true이면 cur_x/cur_y가 유효함
     bool cursor_hidden = false;
+    // host가 진입한 경계 방향(BconnEdge). 반대편 경계 이탈 판정에 쓴다.
+    // 예: host가 RIGHT 로 진입 → 클라이언트 화면의 왼쪽 경계에 닿으면 복귀.
+    int  entry_edge   = 0;
 };
 
 /// 클라이언트 화면 크기를 host에 전송한다.
