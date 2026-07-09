@@ -10,10 +10,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var signalSources: [DispatchSourceSignal] = []
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // 자기 자신을 PID 로 명시 제외하고 다른 인스턴스만 센다.
+        // runningApplications(withBundleIdentifier:) 는 open 실행 시 LaunchServices 가
+        // 자기 프로세스를 잠시 이중 계산해 count>1 이 되는 경쟁이 있어, 단순 count 비교로는
+        // 유일 인스턴스인데도 자살하는 문제가 있다.
         let bundleID = Bundle.main.bundleIdentifier!
-        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-        if running.count > 1 {
-            running.first { !$0.isActive }?.activate()
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != myPID && !$0.isTerminated }
+        if let existing = others.first {
+            existing.activate()
             NSApp.terminate(nil)
         }
     }
@@ -26,14 +32,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let s = AppSettings.shared
 
-        // Host 모드에서 최초 실행 시 시스템 권한 prompt 표시 (이후에는 자동으로 안 뜸).
-        // 사용자가 이 앱이 손쉬운 사용 권한을 필요로 한다는 사실을 인지하도록.
-        if s.mode == .host {
-            let options: [String: Any] = [
-                kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-            ]
-            _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        }
+        // 최초 실행 시 시스템 권한 prompt 표시 (이후에는 자동으로 안 뜸).
+        // Host: CGEventTap 으로 입력을 가로채고, Client: CGEventPost 로 입력을 주입하므로
+        // 두 모드 모두 손쉬운 사용 권한이 필요하다. 사용자가 이를 인지하도록 프롬프트를 띄운다.
+        let options: [String: Any] = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ]
+        _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
         BconnManager.shared.refreshAccessibilityPermission()
 
         guard s.autoStart else { return }
