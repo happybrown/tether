@@ -29,6 +29,10 @@ struct RemoteState {
     // 진입 지점이 아니라 클라이언트에서 실제로 경계를 넘은 지점에 대응한다.
     double return_x  = 0.0;
     double return_y  = 0.0;
+    // 클라이언트 커서의 가상 위치. host 가 원격 중 delta 를 client 와 동일하게 누적/clamp 해
+    // 반대편 경계 도달을 host 가 직접 예측한다 → 복귀 패킷 왕복 지연 없이 즉시 복귀.
+    double client_x  = 0.0;
+    double client_y  = 0.0;
     // 진입한 경계 모니터의 bounds. 진입/복귀 비율을 이 모니터 기준으로 계산해
     // 멀티모니터(세로 배치, 해상도 상이)에서도 클라이언트 화면과 일관되게 대응시킨다.
     CGRect entry_display = CGRectZero;
@@ -54,8 +58,8 @@ void teardown_event_taps();
 /// RunLoop 이 없거나 정지 중이면 CGAssociateMouseAndMouseCursorPosition(true) 만 폴백 호출.
 void force_leave_remote(const char* reason);
 
-/// 클라이언트가 반대편 경계를 넘어 복귀를 요청했을 때 호출한다 (recv 스레드).
-/// ratio(0~1)를 host 복귀 좌표로 변환한 뒤 RunLoop 로 leave_remote 를 dispatch 한다.
+/// 클라이언트 LeavePacket 수신 시 호출한다 (recv 스레드). host 자체 예측이 주 경로이며,
+/// 이 경로는 그것이 놓친 경우의 안전망이다. ratio(0~1)를 복귀 좌표로 변환해 복귀한다.
 void request_leave_remote(double ratio);
 
 /// Cmd+Shift+Esc 세션 강제 중지 시 호출될 콜백을 등록한다.

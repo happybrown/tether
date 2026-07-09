@@ -189,14 +189,15 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             BCONN_DEBUG(CAT_NETWORK, "[호스트] 클라이언트 화면 크기=%dx%d", pkt.width, pkt.height);
         };
 
-        auto on_mouse = [](const MousePacket& pkt) {
-            // client → host 복귀 요청: 클라이언트가 반대편 경계를 넘었음을 알림.
-            // dy 에 복귀 비율(0~32767)이 담겨 있어 host 커서를 해당 위치로 되돌린다.
-            if (pkt.event_type == EVENT_LEAVE_REMOTE) {
-                double ratio = static_cast<double>(pkt.dy) / 32767.0;
-                BCONN_INFO(CAT_CURSOR, "[호스트] 클라이언트 복귀 요청 수신: 비율=%.3f", ratio);
-                request_leave_remote(ratio);
-            }
+        auto on_mouse = [](const MousePacket&) {
+            // host는 client로부터 마우스 패킷을 수신하지 않음 (복귀는 LeavePacket 전용)
+        };
+
+        // host: 클라이언트 복귀 요청 수신 (host 자체 예측이 주 경로, 이건 안전망)
+        auto on_leave = [](const LeavePacket& pkt) {
+            double ratio = static_cast<double>(pkt.ratio) / 32767.0;
+            BCONN_INFO(CAT_CURSOR, "[호스트] 클라이언트 복귀 요청 수신(안전망): 비율=%.3f", ratio);
+            request_leave_remote(ratio);
         };
 
         // host: HELLO 수신 → 재전송 공격 방지 → HMAC 검증 → AUTH_ACK 응답
@@ -258,6 +259,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                                      on_mouse, nullptr, on_hello, nullptr,
                                      on_ping, nullptr, on_clipboard_host,
                                      on_client_info, on_disconnect_host);
+        g_engine->set_leave_callback(on_leave);
         g_engine->start();
 
         // watchdog: 원격 모드 비활성 시 2초 주기, 활성 시 1초 주기로 점검.

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <vector>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -41,25 +42,34 @@ static inline int make_udp_sock() {
 
 class NetworkEngine {
 public:
-    using MouseRecvCallback   = std::function<void(const MousePacket&)>;
-    using KeyRecvCallback     = std::function<void(const KeyPacket&)>;
-    using HelloRecvCallback   = std::function<void(const HelloPacket&, const sockaddr_in&)>;
-    using AuthAckRecvCallback = std::function<void(const AuthAckPacket&)>;
-    using PingRecvCallback    = std::function<void(const sockaddr_in&)>;
-    using PongRecvCallback    = std::function<void()>;
+    using MouseRecvCallback      = std::function<void(const MousePacket&)>;
+    using KeyRecvCallback        = std::function<void(const KeyPacket&)>;
+    using HelloRecvCallback      = std::function<void(const HelloPacket&, const sockaddr_in&)>;
+    using AuthAckRecvCallback    = std::function<void(const AuthAckPacket&)>;
+    using PingRecvCallback       = std::function<void(const sockaddr_in&)>;
+    using PongRecvCallback       = std::function<void()>;
+    using ClipboardRecvCallback  = std::function<void(const uint8_t* data, uint32_t len)>;
+    using ClientInfoRecvCallback = std::function<void(const ClientInfoPacket&)>;
+    using DisconnectCallback     = std::function<void()>;
 
     // host 모드: ip=nullptr, port=listen port
     // client 모드: ip=host ip, port=host port
     NetworkEngine(const char* ip, int port,
-                  MouseRecvCallback   mouse_cb    = nullptr,
-                  KeyRecvCallback     key_cb      = nullptr,
-                  HelloRecvCallback   hello_cb    = nullptr,
-                  AuthAckRecvCallback auth_ack_cb = nullptr,
-                  PingRecvCallback    ping_cb     = nullptr,
-                  PongRecvCallback    pong_cb     = nullptr)
+                  MouseRecvCallback      mouse_cb       = nullptr,
+                  KeyRecvCallback        key_cb         = nullptr,
+                  HelloRecvCallback      hello_cb       = nullptr,
+                  AuthAckRecvCallback    auth_ack_cb    = nullptr,
+                  PingRecvCallback       ping_cb        = nullptr,
+                  PongRecvCallback       pong_cb        = nullptr,
+                  ClipboardRecvCallback  clipboard_cb   = nullptr,
+                  ClientInfoRecvCallback client_info_cb = nullptr,
+                  DisconnectCallback     disconnect_cb  = nullptr)
         : on_mouse(mouse_cb), on_key(key_cb),
           on_hello(hello_cb), on_auth_ack(auth_ack_cb),
           on_ping(ping_cb), on_pong(pong_cb),
+          on_clipboard(clipboard_cb),
+          on_client_info(client_info_cb),
+          on_disconnect(disconnect_cb),
           server_mode(ip == nullptr)
     {
         sock = make_udp_sock();
@@ -140,6 +150,11 @@ public:
         BCONN_INFO(CAT_NETWORK, "[host] peer cleared");
     }
 
+    // peer가 등록되어 있는지 확인 (원격 모드 진입 전 체크용)
+    bool is_peer_known() const {
+        return peer_known.load(std::memory_order_acquire);
+    }
+
     // host: AUTH_ACK 전송 (peer 등록 전이므로 sendto 직접 사용)
     void send_auth_result(bool accepted, const char* host_hostname, const sockaddr_in& to) {
         AuthAckPacket pkt{};
@@ -161,6 +176,44 @@ public:
         send_raw(&pkt, 1);
     }
 
+    // 클립보드 텍스트 전송 (양방향)
+    // UDP fragmentation을 피하기 위해 CLIPBOARD_CHUNK_SIZE(MTU 안전)로 제한.
+    // 초과 시 잘라서 전송한다 (수신 측에서 완전한 텍스트로 사용).
+    // 형식: [PACKET_CLIPBOARD(1) | length(4)] + data
+    void send_clipboard(const uint8_t* data, uint32_t len) {
+        if (len == 0) return;
+        // MTU 안전 크기로 제한 — 초과분은 잘림 (UDP에서 재조립은 비현실적)
+        uint32_t send_len = std::min(len, CLIPBOARD_CHUNK_SIZE);
+        std::vector<uint8_t> buf(5 + send_len);
+        buf[0] = PACKET_CLIPBOARD;
+        memcpy(&buf[1], &send_len, 4);
+        memcpy(&buf[5], data, send_len);
+        send_raw(buf.data(), buf.size());
+    }
+
+    // client → host: 화면 크기 전송 (단일 패킷)
+    void send_client_info(int32_t width, int32_t height) {
+        ClientInfoPacket pkt{};
+        pkt.packet_type = PACKET_CLIENT_INFO;
+        pkt.width       = width;
+        pkt.height      = height;
+        send_raw(&pkt, sizeof(pkt));
+    }
+
+    // client → host: 반대편 경계 이탈 복귀 요청 (비율 + 잔여 delta)
+    void send_leave(uint8_t edge, int16_t ratio, int16_t residual_dx, int16_t residual_dy) {
+        LeavePacket pkt{};
+        pkt.packet_type = PACKET_LEAVE;
+        pkt.edge        = edge;
+        pkt.ratio       = ratio;
+        pkt.residual_dx = residual_dx;
+        pkt.residual_dy = residual_dy;
+        send_raw_any(&pkt, sizeof(pkt));
+    }
+
+    // host: 복귀 요청 수신 콜백 등록 (setter — 생성자 인자 비대화 방지)
+    void set_leave_callback(std::function<void(const LeavePacket&)> cb) { on_leave = std::move(cb); }
+
     // 하위 호환
     void push_mouse(const MousePacket& p) { send_mouse(p); }
     void push_key(const KeyPacket& p)     { send_key(p); }
@@ -174,12 +227,16 @@ private:
     std::atomic<bool> peer_known{false};
     std::thread recv_thread;
     std::atomic<bool> running{false};
-    MouseRecvCallback   on_mouse;
-    KeyRecvCallback     on_key;
-    HelloRecvCallback   on_hello;
-    AuthAckRecvCallback on_auth_ack;
-    PingRecvCallback    on_ping;
-    PongRecvCallback    on_pong;
+    std::function<void(const LeavePacket&)> on_leave;
+    MouseRecvCallback      on_mouse;
+    KeyRecvCallback        on_key;
+    HelloRecvCallback      on_hello;
+    AuthAckRecvCallback    on_auth_ack;
+    PingRecvCallback       on_ping;
+    PongRecvCallback       on_pong;
+    ClipboardRecvCallback  on_clipboard;
+    ClientInfoRecvCallback on_client_info;
+    DisconnectCallback     on_disconnect;
 
     void send_raw(const void* data, size_t len) {
         if (!peer_known.load(std::memory_order_acquire)) return;
@@ -192,7 +249,7 @@ private:
     }
 
     void recv_loop() {
-        uint8_t buf[MAX_PACKET_SIZE];
+        std::vector<uint8_t> buf(MAX_PACKET_SIZE);
         sockaddr_in sender{};
         socklen_t   sender_len = sizeof(sender);
 
@@ -200,17 +257,31 @@ private:
             ssize_t n;
             if (server_mode) {
                 sender_len = sizeof(sender);
-                n = recvfrom(sock, buf, sizeof(buf), 0, (sockaddr*)&sender, &sender_len);
+                n = recvfrom(sock, buf.data(), buf.size(), 0, (sockaddr*)&sender, &sender_len);
             } else {
-                n = recv(sock, buf, sizeof(buf), 0);
+                n = recv(sock, buf.data(), buf.size(), 0);
             }
 
             if (n > 0) {
-                dispatch(buf, n, sender);
-            } else if (n < 0 && errno != EINTR) {
-                // 소켓이 닫혔거나 복구 불가능한 에러 — spin 방지
+                dispatch(buf.data(), n, sender);
+            } else if (n < 0) {
+                if (errno == EINTR) continue;
+                // Client의 connect()된 UDP 소켓에서 ECONNREFUSED는 일시적 에러
+                // (Host가 아직 시작 안 됐거나 ICMP unreachable 수신).
+                // 무시하고 재시도 — ping 루프가 재연결을 시도한다.
+                if (!server_mode && (errno == ECONNREFUSED || errno == EHOSTUNREACH ||
+                                     errno == ENETUNREACH)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
+                // 그 외 에러 (소켓 닫힘 등) — 루프 종료
                 break;
             }
+        }
+
+        // 소켓 에러/종료로 루프 탈출 시 상위에 알림
+        if (running.load(std::memory_order_relaxed) && on_disconnect) {
+            on_disconnect();
         }
     }
 
@@ -236,6 +307,20 @@ private:
             on_ping(sender);
         } else if (type == PACKET_PONG && n == 1 && on_pong) {
             on_pong();
+        } else if (type == PACKET_CLIPBOARD && n >= 5 && on_clipboard) {
+            uint32_t len = 0;
+            memcpy(&len, buf + 1, 4);
+            if (len > 0 && len <= CLIPBOARD_CHUNK_SIZE && n == (ssize_t)(5 + len)) {
+                on_clipboard(buf + 5, len);
+            }
+        } else if (type == PACKET_CLIENT_INFO && n == (ssize_t)sizeof(ClientInfoPacket) && on_client_info) {
+            ClientInfoPacket p;
+            std::memcpy(&p, buf, sizeof(p));
+            on_client_info(p);
+        } else if (type == PACKET_LEAVE && n == (ssize_t)sizeof(LeavePacket) && on_leave) {
+            LeavePacket p;
+            std::memcpy(&p, buf, sizeof(p));
+            on_leave(p);
         }
     }
 };

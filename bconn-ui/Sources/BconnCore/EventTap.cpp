@@ -167,10 +167,13 @@ static CGPoint offscreen_point() {
     return CGPointMake(g_layout.right, 99999.0);
 }
 
-/// 복귀 시 커서를 경계 안쪽 50px 지점으로 되돌린다.
+/// 복귀 시 커서를 경계 바로 안쪽으로 되돌린다.
 /// 경계와 평행한 축 좌표(return_x/return_y)는 클라이언트가 보낸 복귀 비율로 정해진다.
+/// offset 은 재진입 임계값(is_at_trigger_edge 의 3px)보다 크게만 두면 된다.
+/// 즉시 재진입은 return_time 기반 200ms 차단으로 별도로 막으므로 작게 유지해
+/// 복귀 커서가 경계에서 멀리 튀지 않도록 한다.
 static CGPoint return_point() {
-    const double offset = 50.0;
+    const double offset = 8.0;
     switch (g_cfg.client_edge) {
     case BCONN_EDGE_RIGHT:  return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
     case BCONN_EDGE_LEFT:   return CGPointMake(g_layout.trigger_edge + offset, g_remote.return_y);
@@ -238,6 +241,17 @@ static void enter_remote(CGPoint loc) {
         break;
     }
 
+    // 클라이언트 가상 커서 위치를 client_handle_sync 와 동일하게 초기화한다.
+    // client 좌표계는 (0,0)~(width,height) 로 가정 (client 는 화면 원점 기준으로 clamp).
+    double cw = (double)g_client_width.load(std::memory_order_relaxed);
+    double ch = (double)g_client_height.load(std::memory_order_relaxed);
+    switch (g_cfg.client_edge) {
+    case BCONN_EDGE_RIGHT:  g_remote.client_x = 2.0;      g_remote.client_y = ratio * ch; break;
+    case BCONN_EDGE_LEFT:   g_remote.client_x = cw - 2.0; g_remote.client_y = ratio * ch; break;
+    case BCONN_EDGE_BOTTOM: g_remote.client_x = ratio * cw; g_remote.client_y = 2.0;      break;
+    case BCONN_EDGE_TOP:    g_remote.client_x = ratio * cw; g_remote.client_y = ch - 2.0; break;
+    }
+
     MousePacket pkt{};
     pkt.event_type = EVENT_SYNC_CURSOR;
     pkt.dx = static_cast<int16_t>(g_cfg.client_edge);
@@ -274,6 +288,52 @@ static void leave_remote() {
     set_status(BCONN_STATUS_CONNECTED, "연결됨");
 }
 
+/// host 가 client 가상 커서 위치를 delta 로 누적/clamp 하고, 반대편 경계로 이탈하려는지
+/// 예측한다. 이탈 시 그 위치의 복귀 비율을 계산해 즉시 leave_remote 한다 (왕복 지연 없음).
+/// client 의 client_check_leave 와 동일한 기준으로 판정해 양측이 같은 지점에서 복귀한다.
+static bool host_predict_leave(int16_t dx, int16_t dy) {
+    const double EDGE_MARGIN = 8.0;
+    double cw = (double)g_client_width.load(std::memory_order_relaxed);
+    double ch = (double)g_client_height.load(std::memory_order_relaxed);
+
+    // clamp 전 위치로 경계 이탈을 예측한다. 빠른 이동에서 큰 delta 가 경계를
+    // 훌쩍 넘겨도 이번 이벤트에서 즉시 복귀 판정한다 (커서가 경계에 붙는 프레임 방지).
+    double nx = g_remote.client_x + dx;
+    double ny = g_remote.client_y + dy;
+
+    bool leave = false;
+    double ratio = 0.5;   // 경계 평행 축 비율 (복귀 위치)
+    switch (g_cfg.client_edge) {
+    case BCONN_EDGE_RIGHT:  // 왼쪽 경계로 이탈
+        leave = (nx <= EDGE_MARGIN && dx < 0);
+        ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
+        break;
+    case BCONN_EDGE_LEFT:   // 오른쪽 경계로 이탈
+        leave = (nx >= cw - 1.0 - EDGE_MARGIN && dx > 0);
+        ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
+        break;
+    case BCONN_EDGE_BOTTOM: // 위쪽 경계로 이탈
+        leave = (ny <= EDGE_MARGIN && dy < 0);
+        ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
+        break;
+    case BCONN_EDGE_TOP:    // 아래쪽 경계로 이탈
+        leave = (ny >= ch - 1.0 - EDGE_MARGIN && dy > 0);
+        ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
+        break;
+    }
+    if (!leave) {
+        // 이탈 아님 — 위치 갱신 후 계속 원격
+        g_remote.client_x = std::clamp(nx, 0.0, cw - 1.0);
+        g_remote.client_y = std::clamp(ny, 0.0, ch - 1.0);
+        return false;
+    }
+
+    set_return_from_ratio(std::clamp(ratio, 0.0, 1.0));
+    BCONN_INFO(CAT_CURSOR, "[호스트] 자체 복귀 예측: 비율=%.3f", ratio);
+    leave_remote();
+    return true;
+}
+
 // ── CGEventTap 콜백 ───────────────────────────────────────────────────
 
 // macOS 가 콜백 지연/CPU 부하로 tap 을 자동 비활성화할 수 있다. 재활성화하지 않으면 영구 먹통.
@@ -285,9 +345,11 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         return event;
     }
     if (!g_remote.active.load(std::memory_order_acquire)) {
-        // 복귀 직후 200ms 동안 재진입을 차단한다.
+        // 복귀 직후 짧게 재진입을 차단한다. 예측적 복귀로 커서가 경계에서 떨어진
+        // 위치(return_point offset)에 놓이므로 warp 반영에 필요한 최소 시간만 둔다.
+        // 값이 크면 복귀 직후 경계 근처 이동이 억눌려 끊김으로 느껴진다.
         auto elapsed = std::chrono::steady_clock::now() - g_remote.return_time;
-        if (elapsed < std::chrono::milliseconds(200)) return event;
+        if (elapsed < std::chrono::milliseconds(60)) return event;
 
         // 드래그 중에는 원격 진입 차단 — 의도치 않은 전환 방지
         bool is_drag = (type == kCGEventLeftMouseDragged  ||
@@ -314,7 +376,7 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     }
 
     // 진입 직후 몇 이벤트는 host 잔여 delta 이므로 client 로 보내지 않는다.
-    // 복귀 판정은 실제 커서 위치를 아는 client 가 EVENT_LEAVE_REMOTE 로 알려준다.
+    // 복귀 판정은 실제 커서 위치를 아는 client 가 LeavePacket 으로 알려준다.
     if (!is_click && !is_scroll) {
         if (g_remote.entry_guard > 0) { --g_remote.entry_guard; return NULL; }
     }
@@ -337,6 +399,10 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     }
     // is_click 시 dx/dy는 0 (zero-initialized) — 클라이언트는 현재 커서 위치에 클릭 주입
     g_engine->send_mouse(pkt);
+
+    // host 자체 복귀 판정: delta 를 client 가상 위치에 누적(client 와 동일하게 clamp)하고
+    // 반대편 경계 도달 시 왕복 지연 없이 즉시 복귀한다. client 의 LeavePacket 은 이중 안전망.
+    if (!is_click && !is_scroll && host_predict_leave(pkt.dx, pkt.dy)) return NULL;
     return NULL;
 }
 
@@ -516,6 +582,9 @@ void force_leave_remote(const char* reason) {
     CFRunLoopWakeUp(rl);
 }
 
+// 클라이언트 LeavePacket 수신 시의 복귀 경로. host 자체 예측(host_predict_leave)이
+// 주 경로이며 대개 먼저 복귀하므로, 이 경로는 host 예측이 놓친 경우의 안전망이다.
+// (이미 active=false 면 아래 가드에서 무시됨)
 void request_leave_remote(double ratio) {
     if (!g_remote.active.load(std::memory_order_acquire)) return;
 

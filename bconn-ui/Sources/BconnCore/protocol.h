@@ -7,7 +7,6 @@
 // 이벤트 타입 상수 (kCGEventType 범위와 겹치지 않도록 9900번대 사용)
 static const uint32_t EVENT_SYNC_CURSOR  = 9999; // host→client: 진입 Y 비율 전달
 static const uint32_t EVENT_SHOW_CURSOR  = 9998; // host→client: 호스트 복귀 알림
-static const uint32_t EVENT_LEAVE_REMOTE = 9997; // client→host: 반대편 경계 이탈 → 복귀 요청(dx=edge, dy=복귀 비율)
 static const uint32_t EVENT_CLIENT_INFO  = 9996; // (deprecated) PACKET_CLIENT_INFO으로 대체됨
 static const uint32_t EVENT_KEY_DOWN     = 9001; // host→client: 키 눌림
 static const uint32_t EVENT_KEY_UP       = 9002; // host→client: 키 뗌
@@ -22,6 +21,7 @@ static const uint8_t PACKET_PING        = 4; // client → host: 연결 유지 �
 static const uint8_t PACKET_PONG        = 5; // host → client: PING 응답
 static const uint8_t PACKET_CLIPBOARD   = 6; // 양방향: 클립보드 텍스트 동기화
 static const uint8_t PACKET_CLIENT_INFO = 7; // client → host: 화면 크기 전달
+static const uint8_t PACKET_LEAVE       = 8; // client → host: 반대편 경계 이탈 복귀 요청
 
 // 클립보드 패킷 최대 페이로드 크기
 static const uint32_t CLIPBOARD_MAX_BYTES = 60 * 1024;
@@ -69,6 +69,17 @@ struct ClientInfoPacket {
     int32_t  height;
 };
 
+// client → host: 반대편 경계 이탈로 인한 복귀 요청.
+// residual_dx/dy 는 경계를 넘긴 이번 이동의 초과 성분으로, host 가 복귀 직후
+// 커서를 그만큼 이어서 움직여 이동 관성을 유지한다 (엣지 멈춤 방지).
+struct LeavePacket {
+    uint8_t  packet_type;   // = PACKET_LEAVE
+    uint8_t  edge;          // 진입 방향(BconnEdge)
+    int16_t  ratio;         // 복귀 비율 (0~32767)
+    int16_t  residual_dx;   // 경계 초과 이동량 x
+    int16_t  residual_dy;   // 경계 초과 이동량 y
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(MousePacket)      == 9,  "MousePacket size changed");
@@ -76,6 +87,7 @@ static_assert(sizeof(KeyPacket)        == 11, "KeyPacket size changed");
 static_assert(sizeof(HelloPacket)      == 64, "HelloPacket size changed");
 static_assert(sizeof(AuthAckPacket)    == 34, "AuthAckPacket size changed");
 static_assert(sizeof(ClientInfoPacket) == 9,  "ClientInfoPacket size changed");
+static_assert(sizeof(LeavePacket)      == 8,  "LeavePacket size changed");
 
 // recv_loop 버퍼: 클립보드 청크가 가장 크므로 헤더(5B) + 페이로드로 산정
 static const size_t MAX_PACKET_SIZE = 5 + CLIPBOARD_CHUNK_SIZE;
