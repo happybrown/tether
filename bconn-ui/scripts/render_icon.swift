@@ -1,170 +1,195 @@
 import AppKit
 import CoreGraphics
 
-// bconn 앱 아이콘 렌더러.
-// 컨셉: 두 화면(사각형) 사이를 양방향 화살표로 잇는 단순한 형태.
-// 모든 좌표는 1024pt 기준으로 그린 뒤 요청 크기로 스케일한다.
-//
-// 재생성:
-//   swiftc -O render_icon.swift -o /tmp/render_icon
-//   ICONSET=../Sources/BconnApp/Assets.xcassets/AppIcon.appiconset
-//   /tmp/render_icon 16 "$ICONSET/icon_16.png" 32 "$ICONSET/icon_32.png" \
-//     64 "$ICONSET/icon_64.png" 128 "$ICONSET/icon_128.png" \
-//     256 "$ICONSET/icon_256.png" 512 "$ICONSET/icon_512.png" \
-//     1024 "$ICONSET/icon_1024.png"
+// bconn 앱 아이콘 렌더러 (추상·모던 기호형).
+// 컨셉: 두 노드가 흐름(링크)으로 연결 — "두 Mac 사이 입력 공유".
+// 다크 프리미엄 배경 위에 네온 글로우 심볼. 1024pt 기준.
 
 let BASE: CGFloat = 1024
+let CS = CGColorSpaceCreateDeviceRGB()
+
+func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor {
+    CGColor(colorSpace: CS, components: [r, g, b, a])!
+}
+func alpha(_ c: CGColor, _ a: CGFloat) -> CGColor {
+    let p = c.components ?? [1,1,1,1]; return rgb(p[0], p[1], p[2], a)
+}
+func grad(_ stops: [(CGFloat, CGColor)]) -> CGGradient {
+    CGGradient(colorsSpace: CS, colors: stops.map{$0.1} as CFArray, locations: stops.map{$0.0})!
+}
 
 func makeContext(_ size: Int) -> CGContext {
-    let cs = CGColorSpaceCreateDeviceRGB()
-    let ctx = CGContext(data: nil, width: size, height: size,
-                        bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+    let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8,
+                        bytesPerRow: 0, space: CS,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    let scale = CGFloat(size) / BASE
-    ctx.scaleBy(x: scale, y: scale)
+    let s = CGFloat(size)/BASE
+    ctx.scaleBy(x: s, y: s)
     ctx.setAllowsAntialiasing(true)
     ctx.interpolationQuality = .high
     return ctx
 }
 
-// macOS 아이콘 표준: 캔버스의 약 80%를 아트가 차지 (상하좌우 여백).
 func iconRect() -> CGRect {
-    let inset: CGFloat = BASE * 0.10
-    return CGRect(x: inset, y: inset, width: BASE - 2 * inset, height: BASE - 2 * inset)
+    let i = BASE * 0.085
+    return CGRect(x: i, y: i, width: BASE - 2*i, height: BASE - 2*i)
+}
+func roundedPath(_ r: CGRect, _ rad: CGFloat) -> CGPath {
+    CGPath(roundedRect: r, cornerWidth: rad, cornerHeight: rad, transform: nil)
 }
 
-func roundedRectPath(_ rect: CGRect, radius: CGFloat) -> CGPath {
-    CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-}
+// 브랜드 액센트
+let ACCENT = rgb(0.36, 0.66, 1.00)     // 시안-블루
+let ACCENT2 = rgb(0.62, 0.44, 1.00)    // 바이올렛
 
+// ── 배경: 딥 네이비 그라디언트 + 미세 광원/비네팅 ──
 func drawBackground(_ ctx: CGContext) {
     let rect = iconRect()
-    // Big Sur 스타일 둥근 사각형 (superellipse 근사: 모서리 반경 ≈ 너비의 22.5%)
-    let path = roundedRectPath(rect, radius: rect.width * 0.225)
-    ctx.saveGState()
-    ctx.addPath(path)
-    ctx.clip()
+    let rad = rect.width * 0.2237
+    let path = roundedPath(rect, rad)
 
-    // 파랑 → 보라 대각선 그라디언트 (기존 아이콘 톤 계승)
-    let cs = CGColorSpaceCreateDeviceRGB()
-    let colors = [
-        CGColor(red: 0.30, green: 0.42, blue: 0.92, alpha: 1),  // 밝은 파랑 (상단)
-        CGColor(red: 0.46, green: 0.30, blue: 0.82, alpha: 1),  // 보라 (하단)
-    ] as CFArray
-    let grad = CGGradient(colorsSpace: cs, colors: colors, locations: [0, 1])!
-    ctx.drawLinearGradient(grad,
-                           start: CGPoint(x: rect.minX, y: rect.maxY),
-                           end: CGPoint(x: rect.maxX, y: rect.minY),
-                           options: [])
+    ctx.saveGState(); ctx.addPath(path); ctx.clip()
+
+    // 딥 다크 베이스 (상단 약간 밝은 네이비 → 하단 거의 블랙)
+    let base = grad([
+        (0.0, rgb(0.10, 0.13, 0.26)),
+        (0.55, rgb(0.07, 0.09, 0.19)),
+        (1.0, rgb(0.04, 0.05, 0.11)),
+    ])
+    ctx.drawLinearGradient(base,
+        start: CGPoint(x: rect.midX, y: rect.maxY),
+        end:   CGPoint(x: rect.midX, y: rect.minY),
+        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+
+    // 중앙 뒤쪽 은은한 액센트 광 (심볼을 받쳐주는 배경 글로우)
+    let halo = grad([
+        (0.0, alpha(ACCENT, 0.28)),
+        (0.5, alpha(ACCENT2, 0.10)),
+        (1.0, alpha(ACCENT, 0.0)),
+    ])
+    ctx.drawRadialGradient(halo,
+        startCenter: CGPoint(x: rect.midX, y: rect.midY), startRadius: 0,
+        endCenter:   CGPoint(x: rect.midX, y: rect.midY), endRadius: rect.width*0.62,
+        options: [])
     ctx.restoreGState()
 
-    // 은은한 상단 하이라이트로 입체감
-    ctx.saveGState()
-    ctx.addPath(path)
-    ctx.clip()
-    let hl = CGGradient(colorsSpace: cs,
-                        colors: [CGColor(red: 1, green: 1, blue: 1, alpha: 0.18),
-                                 CGColor(red: 1, green: 1, blue: 1, alpha: 0)] as CFArray,
-                        locations: [0, 1])!
-    ctx.drawLinearGradient(hl,
-                           start: CGPoint(x: rect.midX, y: rect.maxY),
-                           end: CGPoint(x: rect.midX, y: rect.midY),
-                           options: [])
-    ctx.restoreGState()
-}
-
-// 한 개의 화면(모니터). 흰색 둥근 사각형 + 안쪽에 살짝 어두운 스크린.
-func drawScreen(_ ctx: CGContext, center: CGPoint, w: CGFloat, h: CGFloat) {
-    let white = CGColor(red: 1, green: 1, blue: 1, alpha: 0.96)
-    let body = CGRect(x: center.x - w/2, y: center.y - h/2, width: w, height: h)
-    let r = w * 0.14
-
-    // 부드러운 그림자
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -BASE*0.006),
-                  blur: BASE*0.02,
-                  color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.22))
-    ctx.addPath(roundedRectPath(body, radius: r))
-    ctx.setFillColor(white)
-    ctx.fillPath()
-    ctx.restoreGState()
-
-    // 안쪽 스크린 (배경색이 살짝 비치는 톤)
-    let pad = w * 0.11
-    let inner = body.insetBy(dx: pad, dy: pad)
-    ctx.addPath(roundedRectPath(inner, radius: r * 0.6))
-    ctx.setFillColor(CGColor(red: 0.36, green: 0.36, blue: 0.55, alpha: 1))
-    ctx.fillPath()
-}
-
-// 두 화면 사이 양방향 화살표. tip 은 양 끝(화면 안쪽 가장자리 근처).
-func drawArrows(_ ctx: CGContext, y: CGFloat, leftX: CGFloat, rightX: CGFloat) {
-    let white = CGColor(red: 1, green: 1, blue: 1, alpha: 0.98)
-    let gap = rightX - leftX
-    let lineW = BASE * 0.034
-    let head = gap * 0.26             // 화살촉 길이
-    let headHalfH = head * 0.85       // 화살촉 절반 높이 (통통하게)
-
-    // 양 끝 tip 을 화면 가장자리에서 살짝 띄운다.
-    let margin = gap * 0.06
-    let x0 = leftX + margin           // 왼쪽 tip
-    let x1 = rightX - margin          // 오른쪽 tip
-
-    // 가로 축: 두 화살촉 밑변 사이만 잇는다 (촉과 겹치지 않게)
-    ctx.setStrokeColor(white)
-    ctx.setLineWidth(lineW)
-    ctx.setLineCap(.round)
-    ctx.move(to: CGPoint(x: x0 + head, y: y))
-    ctx.addLine(to: CGPoint(x: x1 - head, y: y))
+    // 상단 테두리 하이라이트 (유리 엣지)
+    ctx.saveGState(); ctx.addPath(path); ctx.clip()
+    ctx.addPath(roundedPath(rect.insetBy(dx: BASE*0.005, dy: BASE*0.005), rad))
+    ctx.setStrokeColor(rgb(1,1,1,0.14))
+    ctx.setLineWidth(BASE*0.006)
     ctx.strokePath()
+    ctx.restoreGState()
+}
 
-    // 화살촉 (양쪽) — 채워진 삼각형
-    func arrowHead(tipX: CGFloat, pointingLeft: Bool) {
-        let dir: CGFloat = pointingLeft ? 1 : -1  // 밑변이 tip 반대쪽
-        ctx.beginPath()
-        ctx.move(to: CGPoint(x: tipX, y: y))
-        ctx.addLine(to: CGPoint(x: tipX + dir*head, y: y + headHalfH))
-        ctx.addLine(to: CGPoint(x: tipX + dir*head, y: y - headHalfH))
-        ctx.closePath()
-        ctx.setFillColor(white)
-        ctx.fillPath()
+// 발광 스트로크 헬퍼: 글로우(넓고 흐리게) → 코어(선명)
+func glowStroke(_ ctx: CGContext, _ path: CGPath, color: CGColor, width: CGFloat, glow: CGFloat) {
+    ctx.saveGState()
+    ctx.setShadow(offset: .zero, blur: glow, color: alpha(color, 0.9))
+    ctx.addPath(path)
+    ctx.setStrokeColor(color)
+    ctx.setLineWidth(width)
+    ctx.setLineCap(.round)
+    ctx.strokePath()
+    ctx.restoreGState()
+}
+
+// ── 심볼: 두 노드 + 연결 흐름 ──
+// 왼쪽 노드 = 속 빈 링(출발), 오른쪽 노드 = 채워진 발광 코어(도착) → 방향성
+func drawSymbol(_ ctx: CGContext) {
+    let rect = iconRect()
+    let cy = rect.midY
+    let nodeR = rect.width * 0.115
+    let offset = rect.width * 0.235
+    let left  = CGPoint(x: rect.midX - offset, y: cy)
+    let right = CGPoint(x: rect.midX + offset, y: cy)
+
+    let stroke = rect.width * 0.052
+
+    // ── 연결 흐름: 두 노드를 잇는 살짝 아치형 곡선 (S 없이 위로 부드럽게) ──
+    let arcLift = rect.height * 0.0   // 직선 기반, 필요시 아치
+    let flow = CGMutablePath()
+    flow.move(to: CGPoint(x: left.x + nodeR*0.2, y: cy))
+    let c1 = CGPoint(x: rect.midX - offset*0.3, y: cy + arcLift)
+    let c2 = CGPoint(x: rect.midX + offset*0.3, y: cy + arcLift)
+    flow.addCurve(to: CGPoint(x: right.x - nodeR*0.2, y: cy), control1: c1, control2: c2)
+
+    // 흐름 그라디언트: 왼쪽 옅은 시안 → 오른쪽 진한 블루 (마스크로 그라디언트 적용)
+    ctx.saveGState()
+    ctx.setShadow(offset: .zero, blur: BASE*0.03, color: alpha(ACCENT, 0.8))
+    ctx.addPath(flow)
+    ctx.setLineWidth(stroke*0.9)
+    ctx.setLineCap(.round)
+    ctx.replacePathWithStrokedPath()
+    ctx.clip()
+    let lineGrad = grad([(0.0, alpha(ACCENT, 0.55)), (1.0, ACCENT)])
+    ctx.drawLinearGradient(lineGrad,
+        start: CGPoint(x: left.x, y: cy), end: CGPoint(x: right.x, y: cy),
+        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+    ctx.restoreGState()
+
+    // 흐름 위 방향 광점 (중앙에서 오른쪽으로 이동감)
+    for (t, a, rm) in [(0.46, 0.65, 0.7), (0.66, 1.0, 1.05)] as [(CGFloat,CGFloat,CGFloat)] {
+        let x = left.x + (right.x - left.x)*t
+        let r = BASE*0.018*rm
+        ctx.saveGState()
+        ctx.setShadow(offset: .zero, blur: BASE*0.018, color: rgb(0.8,0.95,1,a))
+        let g = grad([(0,rgb(1,1,1,a)),(0.6,alpha(ACCENT,a)),(1,alpha(ACCENT,0))])
+        ctx.drawRadialGradient(g, startCenter: CGPoint(x:x,y:cy), startRadius: 0,
+                               endCenter: CGPoint(x:x,y:cy), endRadius: r, options: [])
+        ctx.restoreGState()
     }
-    arrowHead(tipX: x0, pointingLeft: true)
-    arrowHead(tipX: x1, pointingLeft: false)
+
+    // ── 왼쪽 노드: 속 빈 링 (출발점) ──
+    // 배경을 살짝 파내 심볼이 배경 위에 떠 보이도록 어두운 코어 먼저
+    let ringPath = CGPath(ellipseIn: CGRect(x: left.x-nodeR, y: left.y-nodeR, width: 2*nodeR, height: 2*nodeR), transform: nil)
+    // 링 안쪽을 배경보다 살짝 어둡게
+    ctx.saveGState()
+    ctx.addPath(ringPath); ctx.clip()
+    ctx.setFillColor(rgb(0.04,0.05,0.11,0.6))
+    ctx.fill(rect)
+    ctx.restoreGState()
+    glowStroke(ctx, ringPath, color: ACCENT, width: stroke, glow: BASE*0.025)
+    // 링 상단 하이라이트
+    let hi = CGMutablePath()
+    hi.addArc(center: left, radius: nodeR, startAngle: .pi*0.75, endAngle: .pi*0.15, clockwise: true)
+    glowStroke(ctx, hi, color: rgb(1,1,1,0.7), width: stroke*0.34, glow: 0)
+
+    // ── 오른쪽 노드: 채워진 발광 코어 (도착점) ──
+    ctx.saveGState()
+    ctx.setShadow(offset: .zero, blur: BASE*0.04, color: alpha(ACCENT2, 0.95))
+    let coreGrad = grad([
+        (0.0, rgb(0.95, 0.97, 1.0)),
+        (0.35, ACCENT),
+        (1.0, ACCENT2),
+    ])
+    ctx.addPath(CGPath(ellipseIn: CGRect(x: right.x-nodeR, y: right.y-nodeR, width: 2*nodeR, height: 2*nodeR), transform: nil))
+    ctx.clip()
+    ctx.drawRadialGradient(coreGrad,
+        startCenter: CGPoint(x: right.x - nodeR*0.35, y: right.y + nodeR*0.35), startRadius: 0,
+        endCenter:   CGPoint(x: right.x, y: right.y), endRadius: nodeR*1.4,
+        options: [.drawsAfterEndLocation])
+    ctx.restoreGState()
+    // 코어 상단 스펙큘러 하이라이트
+    let spec = CGRect(x: right.x - nodeR*0.5, y: right.y + nodeR*0.1, width: nodeR*0.6, height: nodeR*0.42)
+    ctx.saveGState()
+    ctx.addPath(CGPath(ellipseIn: spec, transform: nil)); ctx.clip()
+    let sg = grad([(0, rgb(1,1,1,0.85)),(1,rgb(1,1,1,0))])
+    ctx.drawRadialGradient(sg, startCenter: CGPoint(x: spec.midX, y: spec.midY), startRadius: 0,
+                           endCenter: CGPoint(x: spec.midX, y: spec.midY), endRadius: nodeR*0.5, options: [])
+    ctx.restoreGState()
 }
 
 func renderPNG(size: Int, to path: String) {
     let ctx = makeContext(size)
     drawBackground(ctx)
-
-    let rect = iconRect()
-    // 두 화면을 좌우로 배치. 사이에 화살표가 들어갈 공간을 넉넉히 둔다.
-    let screenW = rect.width * 0.30
-    let screenH = screenW * 0.74
-    let cy = rect.midY
-    let offset = rect.width * 0.265
-    let leftC  = CGPoint(x: rect.midX - offset, y: cy)
-    let rightC = CGPoint(x: rect.midX + offset, y: cy)
-
-    drawScreen(ctx, center: leftC,  w: screenW, h: screenH)
-    drawScreen(ctx, center: rightC, w: screenW, h: screenH)
-
-    // 화살표는 두 화면 안쪽 가장자리 사이에 위치
-    drawArrows(ctx,
-               y: cy,
-               leftX: leftC.x + screenW/2,
-               rightX: rightC.x - screenW/2)
-
+    drawSymbol(ctx)
     let img = ctx.makeImage()!
     let rep = NSBitmapImageRep(cgImage: img)
-    let data = rep.representation(using: .png, properties: [:])!
-    try! data.write(to: URL(fileURLWithPath: path))
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
 }
 
-// 실행: 인자로 (크기 경로) 쌍들을 받는다.
 let args = CommandLine.arguments.dropFirst()
 var it = args.makeIterator()
 while let s = it.next(), let p = it.next() {
-    renderPNG(size: Int(s)!, to: p)
-    print("rendered \(s)px -> \(p)")
+    renderPNG(size: Int(s)!, to: p); print("rendered \(s)px -> \(p)")
 }
