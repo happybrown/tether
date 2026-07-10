@@ -366,11 +366,13 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 set_status(BCONN_STATUS_REMOTE, "원격 모드");
                 break;
             case EVENT_SHOW_CURSOR:
-                BCONN_INFO(CAT_CURSOR, "[클라이언트] 커서 표시 (호스트 복귀)");
-                // 호스트가 로컬로 복귀했으므로 클라이언트 커서를 다시 보여준다.
-                if (g_client.cursor_hidden) {
-                    bconn_show_cursor();
-                    g_client.cursor_hidden = false;
+                BCONN_INFO(CAT_CURSOR, "[클라이언트] 커서 숨김 (호스트 복귀)");
+                // 호스트가 로컬로 복귀했으므로 클라이언트 커서를 숨긴다.
+                // 커서-포인터 연동이 true 인 상태(원격 모드 중 유지됨)에서 hide 하면,
+                // 이후 클라의 물리 마우스가 움직이거나 원격 재진입 시 OS가 커서를 되살린다.
+                if (!g_client.cursor_hidden) {
+                    bconn_hide_cursor();
+                    g_client.cursor_hidden = true;
                 }
                 g_client.pos_init = false;
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");

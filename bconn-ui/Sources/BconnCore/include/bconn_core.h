@@ -46,7 +46,16 @@ typedef void (*BconnStatusCallback)(BconnStatus status, const char* message, voi
 // 로그 콜백 — 레벨, 카테고리, 메시지를 Swift로 전달
 typedef void (*BconnLogCallback)(BconnLogLevel level, const char* category, const char* message, void* ctx);
 
+// 클립보드 수신 콜백 — 상대방 클립보드 변경 시 Swift로 전달
+typedef void (*BconnClipboardCallback)(const uint8_t* data, uint32_t len, void* ctx);
+
 void bconn_set_log_callback(BconnLogCallback cb, void* ctx);
+
+// 클립보드 수신 콜백 등록 — bconn_start 전에 호출
+void bconn_set_clipboard_callback(BconnClipboardCallback cb, void* ctx);
+
+// 클립보드 텍스트를 상대방에게 전송 (UTF-8, 인증 완료 상태에서만 동작)
+void bconn_send_clipboard(const uint8_t* data, uint32_t len);
 
 // 세션 시작/중지
 bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx);
@@ -59,6 +68,11 @@ void bconn_install_safety_hooks(void);
 // 사용자 escape hatch: 원격 모드에 갇혔을 때 로컬로 강제 복귀.
 // host 는 원격 모드를 종료, client 는 인증/원격 상태를 리셋해 재연결한다.
 void bconn_force_local(void);
+
+// Cmd+Shift+Esc 감지 시 호출될 콜백 등록 (host 모드 전용).
+// cb 는 CGEventTap RunLoop 스레드에서 호출되므로 내부에서 비동기 처리해야 한다.
+typedef void (*BconnForceStopCallback)(void* ctx);
+void bconn_set_force_stop_callback(BconnForceStopCallback cb, void* ctx);
 
 BconnStatus bconn_get_status(void);
 

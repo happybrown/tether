@@ -13,11 +13,13 @@
 @implementation ProtocolTests
 
 - (void)test_packetSizes {
-    XCTAssertEqual(sizeof(MousePacket),   9u);
-    XCTAssertEqual(sizeof(KeyPacket),    11u);
-    XCTAssertEqual(sizeof(HelloPacket),  64u);
-    XCTAssertEqual(sizeof(AuthAckPacket),34u);
-    XCTAssertEqual(MAX_PACKET_SIZE,      64u);
+    XCTAssertEqual(sizeof(MousePacket),      9u);
+    XCTAssertEqual(sizeof(KeyPacket),       11u);
+    XCTAssertEqual(sizeof(HelloPacket),     64u);
+    XCTAssertEqual(sizeof(AuthAckPacket),   34u);
+    XCTAssertEqual(sizeof(ClientInfoPacket), 9u);
+    // MAX_PACKET_SIZE = 클립보드 헤더(5B) + 청크 페이로드(CLIPBOARD_CHUNK_SIZE)
+    XCTAssertEqual(MAX_PACKET_SIZE, (size_t)(5 + CLIPBOARD_CHUNK_SIZE));
 }
 
 - (void)test_helloPacket_fieldLayout {
