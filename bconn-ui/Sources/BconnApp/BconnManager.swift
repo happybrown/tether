@@ -271,6 +271,18 @@ class BconnManager: ObservableObject {
         }
     }
 
+    /// 메뉴바 아이콘 틴트. 연결/원격 상태에서만 컬러로 강조하고,
+    /// 그 외(대기·중지)에는 nil 을 반환해 메뉴바 기본 단색(다크/라이트 자동 적응)을 쓴다.
+    var menuBarTint: Color? {
+        switch status {
+        case .connected: return .green   // 상대와 연결됨
+        case .remote:    return .blue    // 원격 전환 중
+        case .error:     return .red
+        case .authFailed: return .orange
+        default:         return nil      // 대기·중지: 기본 단색
+        }
+    }
+
     /// 팝오버 상태 헤더에 표시할 SF Symbol. 상태를 아이콘으로도 구분한다.
     var statusHeaderSymbol: String {
         switch status {

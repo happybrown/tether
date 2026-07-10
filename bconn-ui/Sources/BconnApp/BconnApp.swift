@@ -18,11 +18,19 @@ struct BconnApp: App {
         .commandsRemoved()
 
         // ── 메뉴바 ───────────────────────────────────────────────
-        // 상태에 따라 아이콘이 바뀌므로 연결/원격/에러 여부를 메뉴바만 봐도 알 수 있다.
-        // systemImage 표준 이니셜라이저 + .window 스타일 조합이 커스텀 팝오버를
-        // 안정적으로 렌더링한다. (label 에 커스텀 뷰를 넣으면 팝오버가 깨질 수 있어 지양)
-        MenuBarExtra("bconn", systemImage: manager.menuBarSymbol) {
+        // 상태에 따라 아이콘 모양·색이 바뀌어 연결/원격/에러 여부를 메뉴바만 봐도 안다.
+        // 연결/원격 등에서는 컬러 틴트로 강조하고, 대기·중지 시엔 기본 단색을 쓴다.
+        // label 에는 색 제어를 위해 단일 Image 만 넣는다 (복잡한 커스텀 뷰는 .window
+        // 팝오버를 깨뜨릴 수 있어 지양).
+        MenuBarExtra {
             MenuBarView(settingsTab: $settingsTab)
+        } label: {
+            let icon = Image(systemName: manager.menuBarSymbol)
+            if let tint = manager.menuBarTint {
+                icon.foregroundStyle(tint)
+            } else {
+                icon
+            }
         }
         .menuBarExtraStyle(.window)
     }
