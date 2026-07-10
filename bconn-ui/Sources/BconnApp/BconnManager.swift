@@ -112,6 +112,13 @@ class BconnManager: ObservableObject {
         startClipboardPolling()
     }
 
+    /// client 위치(모니터 배치)를 실시간으로 반영한다.
+    /// 실행 중이면 세션 재시작 없이 host 의 커서 전환 경계만 즉시 갱신하고,
+    /// 실행 전이면 다음 start() 에서 설정값이 그대로 적용된다.
+    func updateClientEdge(_ edge: ClientEdge) {
+        bconn_set_client_edge(BconnEdge(UInt32(edge.rawValue)))
+    }
+
     // MARK: - Escape Shortcuts
 
     /// Cmd+Shift+Esc 감지 시 세션을 강제 중지한다.

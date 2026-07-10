@@ -152,7 +152,7 @@ struct SettingsView: View {
                         }
                         MonitorLayoutView(edge: $settings.clientEdge)
                             .frame(maxWidth: .infinity)
-                            .onChange(of: settings.clientEdge) { _ in restartIfRunning() }
+                            .onChange(of: settings.clientEdge) { manager.updateClientEdge($0) }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)

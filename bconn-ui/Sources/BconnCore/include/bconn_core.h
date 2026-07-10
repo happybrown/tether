@@ -69,6 +69,11 @@ void bconn_install_safety_hooks(void);
 // host 는 원격 모드를 종료, client 는 인증/원격 상태를 리셋해 재연결한다.
 void bconn_force_local(void);
 
+// client 위치(host 기준 방향)를 실시간으로 변경한다 (host 모드 전용).
+// 실행 중에도 세션 재시작 없이 커서 전환 경계를 즉시 갱신한다.
+// 실행 전에 호출하면 다음 bconn_start 에 반영된다.
+void bconn_set_client_edge(BconnEdge edge);
+
 // Cmd+Shift+Esc 감지 시 호출될 콜백 등록 (host 모드 전용).
 // cb 는 CGEventTap RunLoop 스레드에서 호출되므로 내부에서 비동기 처리해야 한다.
 typedef void (*BconnForceStopCallback)(void* ctx);

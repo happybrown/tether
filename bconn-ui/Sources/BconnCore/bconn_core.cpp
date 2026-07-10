@@ -635,6 +635,13 @@ void bconn_force_local() {
     }
 }
 
+void bconn_set_client_edge(BconnEdge edge) {
+    // 실행 전 설정은 bconn_start 의 config.client_edge 로 전달되므로 여기선 무시한다.
+    // 이 API 는 "실행 중" host 의 경계를 재시작 없이 실시간 갱신하는 용도다.
+    if (g_status.load() == BCONN_STATUS_IDLE || !g_cfg.is_host) return;
+    apply_client_edge(edge);
+}
+
 int bconn_get_local_ips(char* out, int out_size) {
     struct ifaddrs* ifap = nullptr;
     if (getifaddrs(&ifap) != 0) return 0;

@@ -599,3 +599,27 @@ void request_leave_remote(double ratio) {
     });
     CFRunLoopWakeUp(rl);
 }
+
+// 연결 중 client 위치 변경. 레이아웃/커서 접근을 RunLoop 스레드로 일원화해
+// mouse_callback 및 디스플레이 재설정 콜백과 직렬화한다.
+void apply_client_edge(BconnEdge edge) {
+    CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
+    if (!rl || rl == (CFRunLoopRef)-1) {
+        // RunLoop 이 아직 없으면(시작 전) 값만 갱신 — start 시 refresh_layout 이 반영한다.
+        g_cfg.client_edge = edge;
+        return;
+    }
+
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+        // 경계가 바뀌면 기존 가상 좌표가 무의미하므로 원격 모드 중이면 먼저 복귀한다.
+        // 이 블록은 RunLoop 스레드에서 실행되므로 leave_remote 를 직접 호출한다.
+        // (force_leave_remote 는 leave_remote 를 다시 큐잉해 refresh_layout 뒤로 밀리므로
+        //  복귀 좌표가 새 레이아웃으로 계산되는 것을 피한다.)
+        if (g_remote.active.load(std::memory_order_acquire)) {
+            leave_remote();
+        }
+        g_cfg.client_edge = edge;
+        refresh_layout(edge);
+    });
+    CFRunLoopWakeUp(rl);
+}

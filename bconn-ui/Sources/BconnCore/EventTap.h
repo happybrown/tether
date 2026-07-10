@@ -45,6 +45,11 @@ struct RemoteState {
 /// CGGetActiveDisplayList를 호출해 현재 연결된 모든 디스플레이를 탐색한다.
 void refresh_layout(BconnEdge edge);
 
+/// 연결/실행 중에 client 위치(edge)를 실시간으로 변경한다.
+/// g_cfg.client_edge 를 갱신하고 레이아웃을 다시 계산한다. 원격 모드 중이면 먼저 복귀한다.
+/// 레이아웃/커서 접근을 RunLoop 스레드로 일원화하기 위해 내부에서 dispatch 한다.
+void apply_client_edge(BconnEdge edge);
+
 /// 마우스 이벤트 탭(CGEventTap)을 생성하고 RunLoop에 등록한다.
 /// 이 함수는 g_run_loop_thread 내부에서 호출되어야 한다.
 /// 실패 시 BCONN_STATUS_ERROR 로 상태를 변경한다.
