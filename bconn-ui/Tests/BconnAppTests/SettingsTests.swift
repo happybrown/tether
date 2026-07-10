@@ -243,6 +243,33 @@ final class BconnLifecycleTests: XCTestCase {
         XCTAssertFalse(second, "이미 실행 중일 때 start는 false 반환")
     }
 
+    func test_setClientEdge_whileIdle_isNoOpAndDoesNotCrash() {
+        // IDLE 상태에서 호출해도 크래시 없이 무시된다 (실행 전 설정은 config 로 전달됨)
+        XCTAssertEqual(bconn_get_status(), BCONN_STATUS_IDLE)
+        bconn_set_client_edge(BCONN_EDGE_LEFT)
+        bconn_set_client_edge(BCONN_EDGE_TOP)
+        // 여전히 IDLE — 세션을 시작시키지 않는다
+        XCTAssertEqual(bconn_get_status(), BCONN_STATUS_IDLE)
+    }
+
+    func test_setClientEdge_whileRunning_doesNotRestartSession() {
+        var config = BconnConfig()
+        config.is_host    = true
+        config.port       = 29804
+        config.client_edge = BCONN_EDGE_RIGHT
+
+        XCTAssertTrue(bconn_start(&config, nil, nil))
+        let before = bconn_get_status()
+
+        // 실행 중 위치 변경 — 재시작(IDLE 경유) 없이 상태가 유지되어야 한다
+        bconn_set_client_edge(BCONN_EDGE_BOTTOM)
+        bconn_set_client_edge(BCONN_EDGE_LEFT)
+
+        let after = bconn_get_status()
+        XCTAssertNotEqual(after, BCONN_STATUS_IDLE, "위치 변경이 세션을 중지시키면 안 됨")
+        XCTAssertEqual(after, before, "위치 변경 전후 상태가 동일해야 함 (재시작 없음)")
+    }
+
     func test_statusCallback_called() {
         var config = BconnConfig()
         config.is_host    = true
