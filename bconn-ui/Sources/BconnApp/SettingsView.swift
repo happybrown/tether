@@ -141,14 +141,21 @@ struct SettingsView: View {
                         }
                     }
                     Divider().padding(.leading, 16)
-                    FormRow(label: "Client 위치") {
-                        Picker("", selection: $settings.clientEdge) {
-                            ForEach(ClientEdge.allCases) { Text($0.label).tag($0) }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("모니터 배치")
+                                .font(.system(size: 13))
+                            Spacer()
+                            Text("상대 Mac 위치를 클릭하세요")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
                         }
-                        .pickerStyle(.segmented)
-                        .frame(width: 220)
-                        .labelsHidden()
+                        MonitorLayoutView(edge: $settings.clientEdge)
+                            .frame(maxWidth: .infinity)
+                            .onChange(of: settings.clientEdge) { _ in restartIfRunning() }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 } else {
                     FormRow(label: "Host IP") {
                         TextField("예: 192.168.0.10", text: $settings.hostIP)
