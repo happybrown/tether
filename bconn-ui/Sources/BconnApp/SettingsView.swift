@@ -9,22 +9,15 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(spacing: 20) {
-                    modeSection
-                    if settings.mode == .host && !manager.hasAccessibilityPermission {
-                        permissionSection
-                    }
-                    connectionSection
-                    networkSection
-                    securitySection
-                    if settings.mode == .host {
-                        shortcutSection
-                    }
-                    generalSection
-                }
-                .padding(24)
+            TabView {
+                connectionTab
+                    .tabItem { Label("연결", systemImage: "network") }
+                securityTab
+                    .tabItem { Label("보안", systemImage: "lock") }
+                generalTab
+                    .tabItem { Label("일반", systemImage: "slider.horizontal.3") }
             }
+            .padding(.top, 8)
 
             // ── 하단 상태바 + 버튼 ────────────────────────────────
             Divider()
@@ -53,7 +46,8 @@ struct SettingsView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
         }
-        .frame(width: 520)
+        // 탭마다 콘텐츠 높이가 달라 창이 출렁이지 않도록 고정. 넘치면 각 탭이 스크롤한다.
+        .frame(width: 520, height: 560)
         .onAppear {
             portString = String(settings.port)
             manager.refreshLocalIPs()
@@ -61,6 +55,48 @@ struct SettingsView: View {
         }
         .onChange(of: settings.port) { newValue in
             if portString != String(newValue) { portString = String(newValue) }
+        }
+    }
+
+    // ── 탭: 연결 ──────────────────────────────────────────────────
+    // 모드·권한·연결 대상·네트워크 등 세션을 맺는 데 필요한 설정을 모은다.
+
+    private var connectionTab: some View {
+        tabScroll {
+            modeSection
+            if settings.mode == .host && !manager.hasAccessibilityPermission {
+                permissionSection
+            }
+            connectionSection
+            networkSection
+        }
+    }
+
+    // ── 탭: 보안 ──────────────────────────────────────────────────
+
+    private var securityTab: some View {
+        tabScroll {
+            securitySection
+        }
+    }
+
+    // ── 탭: 일반 ──────────────────────────────────────────────────
+    // 자동 실행 등 일반 옵션과 host 모드 단축키 안내.
+
+    private var generalTab: some View {
+        tabScroll {
+            generalSection
+            if settings.mode == .host {
+                shortcutSection
+            }
+        }
+    }
+
+    /// 각 탭 공통 스크롤 컨테이너. 탭이 길어져도 창 높이를 넘지 않도록 스크롤한다.
+    private func tabScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            VStack(spacing: 20) { content() }
+                .padding(24)
         }
     }
 
@@ -297,118 +333,5 @@ struct SettingsView: View {
             settings.port = value
             restartIfRunning()
         }
-    }
-}
-
-// ── 섹션 컨테이너 ───────────────────────────────────────────────────
-
-private struct FormSection<Content: View>: View {
-    let title: String
-    var icon: String? = nil
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.leading, 4)
-
-            content()
-                .background(.background)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// ── 레이블 + 컨텐츠 행 ─────────────────────────────────────────────
-
-private struct FormRow<Content: View>: View {
-    let label: String
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        HStack(alignment: .center) {
-            Text(label)
-                .font(.system(size: 13))
-            Spacer(minLength: 16)
-            content()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-}
-
-// ── 단축키 행 ──────────────────────────────────────────────────────
-
-private struct ShortcutRow: View {
-    let keys: [String]
-    let label: String
-    let description: String
-
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 13))
-                Text(description)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 16)
-            HStack(spacing: 3) {
-                ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
-                    Text(key)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5)
-                            .stroke(Color.primary.opacity(0.15), lineWidth: 1))
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-}
-
-// ── 토글 행 ────────────────────────────────────────────────────────
-
-private struct FormToggleRow: View {
-    let label: String
-    let description: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 13))
-                Text(description)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 16)
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 }
