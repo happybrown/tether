@@ -17,7 +17,8 @@ struct LogView: View {
             Divider()
             statusBar
         }
-        .frame(minWidth: 560, minHeight: 320)
+        // 설정 창의 탭으로 동작하므로 주어진 영역을 채운다.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // ── 툴바 ──────────────────────────────────────────────────────────

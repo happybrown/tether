@@ -1,25 +1,64 @@
 import SwiftUI
 
+/// 설정 창의 탭. 로그 뷰도 여기에 통합되어 하나의 창으로 동작한다.
+enum SettingsTab: Hashable {
+    case connection, security, general, logs
+}
+
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var manager  = BconnManager.shared
 
+    /// 외부(메뉴바)에서 특정 탭을 선택해 열 수 있도록 바인딩으로 받는다.
+    @Binding var selectedTab: SettingsTab
+
     @State private var portString: String = ""
     @State private var portError: String?
 
+    init(selectedTab: Binding<SettingsTab> = .constant(.connection)) {
+        _selectedTab = selectedTab
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            TabView {
+            TabView(selection: $selectedTab) {
                 connectionTab
                     .tabItem { Label("연결", systemImage: "network") }
+                    .tag(SettingsTab.connection)
                 securityTab
                     .tabItem { Label("보안", systemImage: "lock") }
+                    .tag(SettingsTab.security)
                 generalTab
                     .tabItem { Label("일반", systemImage: "slider.horizontal.3") }
+                    .tag(SettingsTab.general)
+                LogView()
+                    .tabItem { Label("로그", systemImage: "doc.text.magnifyingglass") }
+                    .tag(SettingsTab.logs)
             }
             .padding(.top, 8)
 
-            // ── 하단 상태바 + 버튼 ────────────────────────────────
+            // 로그 탭은 자체 상태바를 가지므로 시작/중지 하단바를 숨긴다.
+            if selectedTab != .logs {
+                sessionBar
+            }
+        }
+        // 로그 탭에서 넓게 볼 수 있도록 최소 크기만 지정하고 리사이즈를 허용한다.
+        // 설정 탭들은 이 최소 크기 안에서 스크롤 없이 담긴다.
+        .frame(minWidth: 520, minHeight: 680)
+        .onAppear {
+            portString = String(settings.port)
+            manager.refreshLocalIPs()
+            manager.refreshAccessibilityPermission()
+        }
+        .onChange(of: settings.port) { newValue in
+            if portString != String(newValue) { portString = String(newValue) }
+        }
+    }
+
+    // ── 하단 세션 상태바 + 시작/중지 버튼 ──────────────────────────
+
+    private var sessionBar: some View {
+        VStack(spacing: 0) {
             Divider()
             HStack(spacing: 8) {
                 Image(systemName: manager.statusHeaderSymbol)
@@ -45,18 +84,6 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
-        }
-        // 탭마다 콘텐츠 높이가 달라 창이 출렁이지 않도록 고정.
-        // 가장 긴 연결 탭(모니터 배치 그리드 포함)이 스크롤 없이 담기도록 높이를 잡는다.
-        // (권한 미승인 시 뜨는 배너는 예외 상태로, 그때만 스크롤이 생길 수 있다.)
-        .frame(width: 520, height: 680)
-        .onAppear {
-            portString = String(settings.port)
-            manager.refreshLocalIPs()
-            manager.refreshAccessibilityPermission()
-        }
-        .onChange(of: settings.port) { newValue in
-            if portString != String(newValue) { portString = String(newValue) }
         }
     }
 

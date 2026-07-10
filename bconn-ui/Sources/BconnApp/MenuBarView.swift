@@ -6,7 +6,16 @@ struct MenuBarView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.openWindow) private var openWindow
 
+    /// 설정 창의 선택 탭. 특정 탭(예: 로그)으로 창을 열 때 사용한다.
+    @Binding var settingsTab: SettingsTab
+
     @State private var copiedIP: String?
+
+    /// 설정 창을 지정한 탭으로 연다. 탭을 먼저 설정한 뒤 창을 띄운다.
+    private func openSettings(_ tab: SettingsTab = .connection) {
+        settingsTab = tab
+        openWindow(id: "settings")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,7 +71,7 @@ struct MenuBarView: View {
             }
             Spacer()
 
-            Button { openWindow(id: "settings") } label: {
+            Button { openSettings() } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
@@ -125,7 +134,7 @@ struct MenuBarView: View {
     // ── Host IP 미설정 안내 (Client 모드) ──────────────────────────────
 
     private var missingHostBanner: some View {
-        Button(action: { openWindow(id: "settings") }) {
+        Button(action: { openSettings(.connection) }) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.orange)
@@ -206,7 +215,7 @@ struct MenuBarView: View {
     }
 
     private var pskMismatchRow: some View {
-        Button(action: { openWindow(id: "settings") }) {
+        Button(action: { openSettings(.security) }) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
@@ -269,14 +278,14 @@ struct MenuBarView: View {
     private var menuActions: some View {
         VStack(spacing: 2) {
             MenuRowButton(icon: "gear", label: "설정...", shortcut: "⌘,") {
-                openWindow(id: "settings")
+                openSettings()
             }
             .keyboardShortcut(",")
 
             MenuRowButton(icon: "doc.text.magnifyingglass",
                           label: "로그...",
                           shortcut: "⌘L") {
-                openWindow(id: "logs")
+                openSettings(.logs)
             }
             .keyboardShortcut("l")
 
