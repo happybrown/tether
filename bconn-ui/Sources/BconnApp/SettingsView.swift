@@ -46,8 +46,10 @@ struct SettingsView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
         }
-        // 탭마다 콘텐츠 높이가 달라 창이 출렁이지 않도록 고정. 넘치면 각 탭이 스크롤한다.
-        .frame(width: 520, height: 560)
+        // 탭마다 콘텐츠 높이가 달라 창이 출렁이지 않도록 고정.
+        // 가장 긴 연결 탭(모니터 배치 그리드 포함)이 스크롤 없이 담기도록 높이를 잡는다.
+        // (권한 미승인 시 뜨는 배너는 예외 상태로, 그때만 스크롤이 생길 수 있다.)
+        .frame(width: 520, height: 680)
         .onAppear {
             portString = String(settings.port)
             manager.refreshLocalIPs()
