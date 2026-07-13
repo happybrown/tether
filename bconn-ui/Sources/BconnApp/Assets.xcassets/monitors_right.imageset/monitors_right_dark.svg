@@ -13,7 +13,7 @@
     <rect x="18" y="52" width="24" height="4" rx="2" fill="#ffffff"/>
   </g>
   <!-- 오른쪽(작은) 모니터 (앞) -->
-  <path d="M56 26 h36 a4 4 0 0 1 4 4 v24 a4 4 0 0 1 -4 4 h-36 a4 4 0 0 1 -4 -4 v-24 a4 4 0 0 1 4 -4 z" fill="#0A84FF"/>
+  <path d="M56 26 h36 a4 4 0 0 1 4 4 v24 a4 4 0 0 1 -4 4 h-36 a4 4 0 0 1 -4 -4 v-24 a4 4 0 0 1 4 -4 z" fill="#8e8e93" fill-opacity="0.5"/>
   <path d="M56 26 h36 a4 4 0 0 1 4 4 v24 a4 4 0 0 1 -4 4 h-36 a4 4 0 0 1 -4 -4 v-24 a4 4 0 0 1 4 -4 z" fill="none" stroke="#ffffff" stroke-width="6"/>
   <rect x="70" y="58" width="8" height="6" fill="#ffffff"/>
   <rect x="62" y="64" width="24" height="4" rx="2" fill="#ffffff"/>

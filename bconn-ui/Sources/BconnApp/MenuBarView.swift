@@ -31,28 +31,25 @@ struct MenuBarView: View {
             // host: CGEventTap 으로 입력을 가로챈다. client: CGEventPost 로 마우스/키를 주입한다.
             // 권한이 없으면 client 는 커서 이동은 되지만 클릭·키 입력이 조용히 무시된다.
             if !manager.hasAccessibilityPermission {
-                Divider().padding(.horizontal, 8)
                 permissionBanner
             }
 
             if manager.status == .error && !manager.statusMessage.isEmpty {
-                Divider().padding(.horizontal, 8)
                 errorBanner(message: manager.statusMessage)
             }
 
             if !isClientReady {
-                Divider().padding(.horizontal, 8)
                 missingHostBanner
             }
 
-            Divider().padding(.horizontal, 8)
             connectionInfo
-            Divider().padding(.horizontal, 8)
             actionButtons
-            Divider().padding(.horizontal, 8)
             menuActions
         }
-        .frame(width: 280)
+        .frame(width: 300)
+        // 시스템 vibrancy 재질을 배경으로 깔아 뒤 화면이 비쳐 텍스트 대비가 흔들리는
+        // 것을 막는다. 재질 위에서는 secondary/tertiary 색도 안정적으로 읽힌다.
+        .background(.regularMaterial)
         .animation(.easeInOut(duration: 0.18), value: manager.status)
     }
 
@@ -62,15 +59,15 @@ struct MenuBarView: View {
         HStack(spacing: 11) {
             ZStack {
                 Circle()
-                    .fill(manager.statusColor.opacity(0.15))
-                    .frame(width: 30, height: 30)
+                    .fill(manager.statusColor.opacity(0.18))
+                    .frame(width: 32, height: 32)
                 Image(systemName: manager.statusHeaderSymbol)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(manager.statusColor)
             }
             .accessibilityLabel("상태: \(manager.statusLabel)")
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(manager.statusLabel)
                     .font(.system(size: 13, weight: .semibold))
                     .contentTransition(.opacity)
@@ -86,25 +83,35 @@ struct MenuBarView: View {
 
             Button { openSettings() } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
+                    .padding(6)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("설정 (⌘,)")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
         .background(
             manager.status == .remote
-                ? manager.statusColor.opacity(0.08) : Color.clear
+                ? manager.statusColor.opacity(0.10) : Color.clear
         )
+        .overlay(alignment: .bottom) { hairline }
+    }
+
+    /// 섹션 사이를 나누는 은은한 구분선. Divider 보다 옅게 써서 카드형 리듬을 만든다.
+    private var hairline: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(height: 1)
     }
 
     // ── 접근성 권한 배너 (Host 모드에서만) ───────────────────────────────
 
     private var permissionBanner: some View {
         Button(action: { manager.openAccessibilitySettings() }) {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "lock.shield.fill")
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
@@ -120,11 +127,9 @@ struct MenuBarView: View {
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.orange.opacity(0.8))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .bannerCard(tint: .orange)
         }
         .buttonStyle(.plain)
         .help("시스템 설정 > 개인 정보 보호 및 보안 > 손쉬운 사용")
@@ -133,24 +138,23 @@ struct MenuBarView: View {
     // ── 에러 배너 ─────────────────────────────────────────────────────
 
     private func errorBanner(message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 9) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
             Text(message)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .bannerCard(tint: .red)
     }
 
     // ── Host IP 미설정 안내 (Client 모드) ──────────────────────────────
 
     private var missingHostBanner: some View {
         Button(action: { openSettings(.connection) }) {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
@@ -163,11 +167,9 @@ struct MenuBarView: View {
                 Spacer(minLength: 0)
                 Image(systemName: "gear")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.orange.opacity(0.8))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .bannerCard(tint: .orange)
         }
         .buttonStyle(.plain)
     }
@@ -175,7 +177,7 @@ struct MenuBarView: View {
     // ── 연결 정보 ─────────────────────────────────────────────────────
 
     private var connectionInfo: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 9) {
             if settings.mode == .host {
                 InfoRow(icon: "network", label: "포트", value: "\(settings.port)")
                 InfoRow(icon: "arrow.right.square", label: "Client 위치",
@@ -201,8 +203,19 @@ struct MenuBarView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        // 정보를 카드 표면에 얹어, 배경과 분리된 명확한 읽기 영역을 만든다.
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.primary.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 
     private func copyableIPRow(label: String, ip: String, hint: String) -> some View {
@@ -292,6 +305,8 @@ struct MenuBarView: View {
 
     private var menuActions: some View {
         VStack(spacing: 2) {
+            hairline.padding(.horizontal, -8).padding(.bottom, 4)
+
             MenuRowButton(icon: "gear", label: "설정...", shortcut: "⌘,") {
                 openSettings()
             }
@@ -309,8 +324,8 @@ struct MenuBarView: View {
             }
             .keyboardShortcut("q")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 
     // ── 헬퍼 ──────────────────────────────────────────────────────────
@@ -345,6 +360,30 @@ struct MenuBarView: View {
     }
 }
 
+// ── 공용 스타일 ──────────────────────────────────────────────────────────
+
+private extension View {
+    /// 경고·안내 배너를 색상 틴트 카드로 감싼다. 회색 배경 위에 텍스트가 바로 얹혀
+    /// 대비가 흐려지는 것을 막고, 색으로 심각도를 즉시 구분하게 한다.
+    func bannerCard(tint: Color) -> some View {
+        self
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(tint.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(tint.opacity(0.22), lineWidth: 1)
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .contentShape(Rectangle())
+    }
+}
+
 // ── 서브 컴포넌트 ────────────────────────────────────────────────────────
 
 private struct InfoRow: View {
@@ -353,16 +392,16 @@ private struct InfoRow: View {
     let value: String
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
-                .frame(width: 14)
+                .frame(width: 15)
             Text(label)
                 .foregroundStyle(.secondary)
                 .font(.system(size: 12))
             Spacer()
             Text(value)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .lineLimit(1)
@@ -418,6 +457,9 @@ private struct MenuRowButton: View {
         self.action = action
     }
 
+    /// 하이라이트(hover 또는 press) 상태인지.
+    private var highlighted: Bool { hovered || pressed }
+
     var body: some View {
         Button {
             pressed = true
@@ -432,17 +474,22 @@ private struct MenuRowButton: View {
                 if let shortcut {
                     Text(shortcut)
                         .font(.system(size: 11))
-                        .foregroundStyle(Color.secondary)
+                        // 하이라이트 시엔 흰 배경 위라 흰색을 살짝 흐리게, 기본 상태엔 secondary.
+                        .foregroundStyle(highlighted ? Color.white.opacity(0.75) : Color.secondary)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .font(.system(size: 13))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            // macOS 메뉴 정석: 하이라이트 시 accent 색으로 배경을 꽉 채우고 전경을 흰색으로.
+            // 눌린 순간엔 살짝 어둡게 해 클릭 피드백을 준다.
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(pressed ? Color.accentColor.opacity(0.25) :
-                          hovered ? Color.accentColor.opacity(0.12) : Color.clear)
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(highlighted
+                          ? Color.accentColor.opacity(pressed ? 0.85 : 1.0)
+                          : Color.clear)
             )
-            .foregroundStyle(hovered || pressed ? Color.primary : Color.primary.opacity(0.85))
+            .foregroundStyle(highlighted ? Color.white : Color.primary)
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.1), value: hovered)
             .animation(.easeOut(duration: 0.1), value: pressed)
