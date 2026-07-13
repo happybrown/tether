@@ -275,29 +275,37 @@ class BconnManager: ObservableObject {
         }
     }
 
-    /// 메뉴바에 노출될 SF Symbol 이름. 상태를 아이콘 모양으로 구분해 빠른 확인을 돕는다.
-    /// 모든 이름은 실제 존재하는 SF Symbol 이어야 한다 (없는 이름은 빈 아이콘으로 렌더됨).
-    var menuBarSymbol: String {
+    /// 메뉴바 커스텀 아이콘(Asset) 이름. 연결 관련 3상태를 모니터 2대 아이콘의
+    /// 화면 색으로 구분한다. 화면에 파랑이 들어온 쪽이 현재 제어 위치를 뜻한다.
+    ///   미연결 → 양쪽 비움 / 로컬 → 왼쪽 파랑 / 원격 → 오른쪽 파랑
+    /// 오류·인증실패는 경고성 SF Symbol 이 더 직관적이라 nil 을 반환해 그쪽으로 폴백한다.
+    /// Asset 은 light/dark 두 벌 + template-rendering-intent=original 이라 부분 컬러가
+    /// 메뉴바에서 그대로 보인다.
+    var menuBarAsset: String? {
         switch status {
-        case .idle:        return "display.2"
-        case .waiting:     return "display.2"              // 대기: 기본 아이콘
-        case .connected:   return "display.2"              // 연결: 기본 아이콘
-        case .remote:      return "arrow.left.arrow.right" // 원격: 화살표로 전환 상태 표시
-        case .error:       return "exclamationmark.triangle.fill"
-        case .authFailed:  return "lock.trianglebadge.exclamationmark.fill"
-        default:           return "display.2"
+        case .idle, .waiting: return "monitors_default"
+        case .connected:      return "monitors_left"
+        case .remote:         return "monitors_right"
+        default:              return nil   // 오류·인증실패: SF Symbol 폴백
         }
     }
 
-    /// 메뉴바 아이콘 틴트. 연결/원격 상태에서만 컬러로 강조하고,
-    /// 그 외(대기·중지)에는 nil 을 반환해 메뉴바 기본 단색(다크/라이트 자동 적응)을 쓴다.
+    /// menuBarAsset 이 nil 인 상태(오류·인증실패)에서 쓰는 SF Symbol.
+    var menuBarSymbol: String {
+        switch status {
+        case .error:      return "exclamationmark.triangle.fill"
+        case .authFailed: return "lock.trianglebadge.exclamationmark.fill"
+        default:          return "display.2"
+        }
+    }
+
+    /// SF Symbol 폴백 상태의 아이콘 틴트. 커스텀 아이콘 상태는 자체 색을 담고 있어
+    /// 틴트를 쓰지 않는다(nil).
     var menuBarTint: Color? {
         switch status {
-        case .connected: return .green   // 상대와 연결됨
-        case .remote:    return .blue    // 원격 전환 중
-        case .error:     return .red
+        case .error:      return .red
         case .authFailed: return .orange
-        default:         return nil      // 대기·중지: 기본 단색
+        default:          return nil
         }
     }
 

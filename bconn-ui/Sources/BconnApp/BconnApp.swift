@@ -25,11 +25,21 @@ struct BconnApp: App {
         MenuBarExtra {
             MenuBarView(settingsTab: $settingsTab)
         } label: {
-            let icon = Image(systemName: manager.menuBarSymbol)
-            if let tint = manager.menuBarTint {
-                icon.foregroundStyle(tint)
+            // 연결 3상태는 모니터 2대 커스텀 아이콘(부분 컬러)으로, 오류·인증실패는
+            // 경고성 SF Symbol + 틴트로 표시한다.
+            if let asset = manager.menuBarAsset {
+                // .original: 메뉴바가 아이콘을 단색 template 으로 강제하지 않게 해
+                // 화면의 부분 파랑이 그대로 보이게 한다.
+                // 크기는 asset SVG 의 width/height(높이 17pt)로 정해진다 — MenuBarExtra
+                // label 은 SwiftUI frame 을 무시하고 이미지 고유 크기를 쓰기 때문이다.
+                Image(asset).renderingMode(.original)
             } else {
-                icon
+                let icon = Image(systemName: manager.menuBarSymbol)
+                if let tint = manager.menuBarTint {
+                    icon.foregroundStyle(tint)
+                } else {
+                    icon
+                }
             }
         }
         .menuBarExtraStyle(.window)

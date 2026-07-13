@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 74" width="22.9" height="17">
+  <defs>
+    <mask id="cut">
+      <rect x="0" y="0" width="100" height="74" fill="white"/>
+      <path d="M50 20 h50 v42 h-50 z" fill="black"/>
+    </mask>
+  </defs>
+  <!-- 왼쪽(큰) 모니터: 작은 모니터 영역을 mask 로 도려낸다 -->
+  <g mask="url(#cut)">
+    <path d="M6 8 h48 a4 4 0 0 1 4 4 v30 a4 4 0 0 1 -4 4 h-48 a4 4 0 0 1 -4 -4 v-30 a4 4 0 0 1 4 -4 z" fill="none"/>
+    <path d="M6 8 h48 a4 4 0 0 1 4 4 v30 a4 4 0 0 1 -4 4 h-48 a4 4 0 0 1 -4 -4 v-30 a4 4 0 0 1 4 -4 z" fill="none" stroke="#ffffff" stroke-width="6"/>
+    <rect x="26" y="46" width="8" height="6" fill="#ffffff"/>
+    <rect x="18" y="52" width="24" height="4" rx="2" fill="#ffffff"/>
+  </g>
+  <!-- 오른쪽(작은) 모니터 (앞) -->
+  <path d="M56 26 h36 a4 4 0 0 1 4 4 v24 a4 4 0 0 1 -4 4 h-36 a4 4 0 0 1 -4 -4 v-24 a4 4 0 0 1 4 -4 z" fill="#0A84FF"/>
+  <path d="M56 26 h36 a4 4 0 0 1 4 4 v24 a4 4 0 0 1 -4 4 h-36 a4 4 0 0 1 -4 -4 v-24 a4 4 0 0 1 4 -4 z" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <rect x="70" y="58" width="8" height="6" fill="#ffffff"/>
+  <rect x="62" y="64" width="24" height="4" rx="2" fill="#ffffff"/>
+</svg>
