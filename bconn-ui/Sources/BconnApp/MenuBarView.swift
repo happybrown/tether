@@ -65,9 +65,13 @@ struct MenuBarView: View {
                 Text(manager.statusLabel)
                     .font(.system(size: 13, weight: .semibold))
                     .contentTransition(.opacity)
-                Text(settings.mode.label + " 모드")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Text(settings.mode.label + " 모드")
+                    Text("v" + manager.appVersion)
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
             }
             Spacer()
 

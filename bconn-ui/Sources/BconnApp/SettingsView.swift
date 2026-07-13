@@ -118,6 +118,7 @@ struct SettingsView: View {
             if settings.mode == .host {
                 shortcutSection
             }
+            aboutSection
         }
     }
 
@@ -334,6 +335,19 @@ struct SettingsView: View {
                     label: "세션 강제 중지",
                     description: "완전히 먹통이 됐을 때 세션 전체를 종료합니다"
                 )
+            }
+        }
+    }
+
+    // ── 앱 정보 ────────────────────────────────────────────────────
+
+    private var aboutSection: some View {
+        FormSection(title: "정보", icon: "info.circle") {
+            FormRow(label: "버전") {
+                Text(manager.appVersion)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
     }

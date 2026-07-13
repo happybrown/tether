@@ -64,6 +64,11 @@ class BconnManager: ObservableObject {
         }
     }
 
+    /// 앱 표시용 버전 문자열 (예: "0.8.1"). Info.plist 의 CFBundleShortVersionString 을 읽는다.
+    var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
     func refreshLocalIPs() {
         var buf = [CChar](repeating: 0, count: 512)
         let count = buf.withUnsafeMutableBufferPointer { ptr in

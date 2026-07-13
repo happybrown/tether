@@ -66,6 +66,23 @@ fi
 
 mkdir -p bin
 
+# 빌드마다 버전 patch 자리(x.y.Z)를 자동 증가시킨다.
+# project.yml 의 MARKETING_VERSION 이 버전 단일 소스이며, Info.plist 는 이를 변수로 참조한다.
+PROJECT_YML="bconn-ui/project.yml"
+CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+if [ -n "$CUR_VER" ]; then
+    MAJOR=$(echo "$CUR_VER" | cut -d. -f1)
+    MINOR=$(echo "$CUR_VER" | cut -d. -f2)
+    PATCH=$(echo "$CUR_VER" | cut -d. -f3)
+    NEW_VER="$MAJOR.$MINOR.$((PATCH + 1))"
+    # CURRENT_PROJECT_VERSION(빌드 번호)도 함께 증가
+    CUR_BUILD=$(grep 'CURRENT_PROJECT_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+)".*/\1/')
+    NEW_BUILD=$((CUR_BUILD + 1))
+    sed -i '' -E "s/(MARKETING_VERSION: )\"[0-9.]+\"/\1\"$NEW_VER\"/" "$PROJECT_YML"
+    sed -i '' -E "s/(CURRENT_PROJECT_VERSION: )\"[0-9]+\"/\1\"$NEW_BUILD\"/" "$PROJECT_YML"
+    echo "버전: $CUR_VER → $NEW_VER (빌드 $NEW_BUILD)"
+fi
+
 ARCH=$(uname -m)
 echo "빌드 중... (아키텍처: $ARCH)"
 
