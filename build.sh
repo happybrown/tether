@@ -68,9 +68,13 @@ mkdir -p bin
 
 # 빌드마다 버전 patch 자리(x.y.Z)를 자동 증가시킨다.
 # project.yml 의 MARKETING_VERSION 이 버전 단일 소스이며, Info.plist 는 이를 변수로 참조한다.
+# BCONN_NO_VERSION_BUMP=1 이면 증가를 건너뛴다 — deploy.sh 가 원격(iMac) 빌드 시 사용해
+# 로컬이 이미 올린 버전을 그대로 유지(양쪽 이중 증가 방지).
 PROJECT_YML="bconn-ui/project.yml"
 CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
-if [ -n "$CUR_VER" ]; then
+if [ -n "$BCONN_NO_VERSION_BUMP" ]; then
+    echo "버전 증가 건너뜀 (BCONN_NO_VERSION_BUMP): $CUR_VER 유지"
+elif [ -n "$CUR_VER" ]; then
     MAJOR=$(echo "$CUR_VER" | cut -d. -f1)
     MINOR=$(echo "$CUR_VER" | cut -d. -f2)
     PATCH=$(echo "$CUR_VER" | cut -d. -f3)
@@ -99,6 +103,10 @@ cp -R "bconn-ui/build/Build/Products/Release/Bconn.app" bin/Bconn.app
 
 # quarantine 속성 제거 후 재서명 — Gatekeeper가 adhoc 서명 앱을 거부하는 것을 방지
 xattr -cr bin/Bconn.app
+
+# 참고: SSH(비대화형) 세션에서 login keychain 이 잠겨 있으면 codesign 이 개인키에 접근 못 해
+# adhoc 으로 떨어진다. 원격(iMac) 빌드 시의 keychain unlock 은 deploy.sh 가 책임진다
+# (로컬 keychain 에 저장한 iMac 암호를 SSH 세션에서 unlock). 여기서는 순수 빌드만 한다.
 
 # 개발용 인증서(bconn-dev)가 있으면 그걸로 서명한다.
 # 인증서 기반 서명은 재빌드해도 코드 해시가 아닌 서명 주체로 TCC가 앱을 식별하므로

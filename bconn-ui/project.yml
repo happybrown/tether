@@ -44,8 +44,8 @@ targets:
         PRODUCT_NAME: Bconn
         # 버전 단일 소스. build.sh 가 빌드 시마다 patch 자리를 자동 증가시킨다.
         # 다음 빌드가 0.8.1 이 되도록 0.8.0 에서 시작한다.
-        MARKETING_VERSION: "0.8.1"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.8.12"
+        CURRENT_PROJECT_VERSION: "12"
         SWIFT_OBJC_INTEROP_MODE: objcxx
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include
         SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
