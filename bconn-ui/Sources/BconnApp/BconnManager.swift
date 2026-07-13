@@ -30,6 +30,19 @@ class BconnManager: ObservableObject {
         startPermissionPolling()
         registerClipboardCallback()
         registerForceStopCallback()
+        observeScreenChanges()
+    }
+
+    /// 모니터 연결/해제/배치 변경을 관찰해 C 코어에 통지한다.
+    /// host 는 커서 전환 경계 레이아웃을, client 는 화면 해상도를 재계산한다.
+    /// 실행 중이 아니면 C 쪽에서 무시하므로 항상 관찰해도 안전하다.
+    private func observeScreenChanges() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { _ in
+            bconn_displays_changed()
+        }
     }
 
     /// 손쉬운 사용 권한 상태를 갱신한다. Host 모드에서 CGEventTap 이 동작하려면 필요.

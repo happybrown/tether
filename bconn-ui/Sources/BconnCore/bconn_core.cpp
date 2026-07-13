@@ -92,6 +92,11 @@ std::atomic<int32_t> g_client_height{18000};
 RemoteState g_remote;
 ClientState g_client;
 
+// client: 디스플레이 변경 대기 플래그. Swift(메인 스레드)가 bconn_displays_changed 로
+// 세우고, ping 스레드가 감지해 client_apply_display_change 를 실행한다. client 의 커서/화면
+// 상태는 recv·ping 스레드에서만 만지도록 일원화해 메인 스레드와의 경합을 피한다.
+static std::atomic<bool> g_client_displays_dirty{false};
+
 
 
 // ── 내부 헬퍼 ─────────────────────────────────────────────────────────
@@ -488,6 +493,13 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 if (!g_ping_running.load(std::memory_order_acquire)) break;
                 elapsed_ms += 100;
 
+                // 디스플레이 변경 처리: 메인 스레드가 세운 플래그를 이 스레드에서 소비해
+                // 화면 재계산/재전송/복원을 한다 (client 커서·화면 상태를 단일 스레드로 일원화).
+                if (g_client_displays_dirty.exchange(false, std::memory_order_acq_rel) &&
+                    g_auth_ok.load(std::memory_order_acquire)) {
+                    client_apply_display_change();
+                }
+
                 bool in_remote = g_client.pos_init;
                 int send_interval_ms = in_remote ? REMOTE_PING_INTERVAL_MS : interval_s * 1000;
                 if (elapsed_ms < send_interval_ms) continue;
@@ -655,6 +667,7 @@ void bconn_stop() {
     g_client  = {};
     g_auth_ok.store(false, std::memory_order_release);
     g_last_pong_time.store(0, std::memory_order_release);
+    g_client_displays_dirty.store(false, std::memory_order_release);
     set_status(BCONN_STATUS_IDLE, "중지됨");
 
     BCONN_INFO(CAT_NETWORK, "bconn_stop 완료");
@@ -678,6 +691,22 @@ void bconn_set_client_edge(BconnEdge edge) {
     // 이 API 는 "실행 중" host 의 경계를 재시작 없이 실시간 갱신하는 용도다.
     if (g_status.load() == BCONN_STATUS_IDLE || !g_cfg.is_host) return;
     apply_client_edge(edge);
+}
+
+void bconn_displays_changed() {
+    if (g_status.load() == BCONN_STATUS_IDLE) return;
+
+    if (g_cfg.is_host) {
+        // host: 현재 경계로 레이아웃을 재계산한다. apply_client_edge 가 RunLoop 스레드에서
+        // 원격 모드 복귀 + refresh_layout 을 수행하므로 그대로 재사용한다.
+        // (host 는 CGDisplayRegisterReconfigurationCallback 도 있어 이중 안전망이다.)
+        BCONN_INFO(CAT_CURSOR, "[호스트] 디스플레이 변경 통지 — 레이아웃 재계산");
+        apply_client_edge(g_cfg.client_edge);
+    } else {
+        // client: 화면 재계산은 커서/화면 상태를 만지므로 recv·ping 스레드로 위임한다.
+        // 플래그만 세우고 ping 스레드가 다음 틱(≤100ms)에 소비한다.
+        g_client_displays_dirty.store(true, std::memory_order_release);
+    }
 }
 
 int bconn_get_local_ips(char* out, int out_size) {

@@ -40,6 +40,31 @@ void send_client_info() {
     g_engine->send_client_info(w, h);
 }
 
+void client_apply_display_change() {
+    ScreenBounds old_screen = g_client.screen;
+    g_client.screen = get_screen_bounds();
+
+    BCONN_INFO(CAT_CURSOR,
+        "[클라이언트] 디스플레이 변경 감지 — 화면 재계산: (%.0f x %.0f) → (%.0f x %.0f)",
+        old_screen.width(), old_screen.height(),
+        g_client.screen.width(), g_client.screen.height());
+
+    // 원격 모드 중이었다면 기존 커서 좌표계가 새 배치에서 무의미하므로 로컬로 복원한다.
+    // host 도 자신의 디스플레이 콜백/복귀로 재동기화하며, 이후 재진입 시 새 화면 기준으로
+    // SYNC_CURSOR 가 다시 매핑된다.
+    if (g_client.pos_init) {
+        g_client.pos_init = false;
+        if (g_client.cursor_hidden) {
+            bconn_show_cursor();
+            g_client.cursor_hidden = false;
+        }
+        BCONN_INFO(CAT_CURSOR, "[클라이언트] 디스플레이 변경 — 원격 모드 로컬 복원");
+    }
+
+    // 새 화면 크기를 host 에 재전송해 host 의 커서 예측이 올바른 해상도를 쓰게 한다.
+    if (g_engine) send_client_info();
+}
+
 // ── 수신 패킷 처리 ────────────────────────────────────────────────────
 
 void client_handle_sync(const MousePacket& pkt) {

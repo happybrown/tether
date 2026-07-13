@@ -79,6 +79,13 @@ void bconn_set_client_edge(BconnEdge edge);
 typedef void (*BconnForceStopCallback)(void* ctx);
 void bconn_set_force_stop_callback(BconnForceStopCallback cb, void* ctx);
 
+// 모니터 연결/해제/배치 변경 시 호출한다 (host/client 공용).
+// Swift 의 didChangeScreenParametersNotification 관찰자가 호출한다.
+// host: 디스플레이 레이아웃(trigger edge 등)을 재계산한다. 원격 모드 중이면 먼저 복귀.
+// client: 화면 경계를 재계산하고 새 크기를 host 에 재전송한다. 원격 모드 중이면 먼저 로컬 복원.
+// 여러 스레드에서 안전하게 호출 가능 (내부에서 적절한 스레드로 위임).
+void bconn_displays_changed(void);
+
 BconnStatus bconn_get_status(void);
 
 // 현재 호스트의 로컬 IP 목록 — '\n'으로 구분된 문자열을 out 버퍼에 기록

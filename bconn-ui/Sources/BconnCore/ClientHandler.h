@@ -40,6 +40,12 @@ struct ClientState {
 /// EVENT_SYNC_CURSOR 수신 직후와 AUTH_ACK 수신 후 호출된다.
 void send_client_info();
 
+/// 모니터 연결/해제/배치 변경 시 클라이언트 화면 경계를 재계산한다.
+/// 새 크기를 host 에 재전송하고, 원격 모드 중이었다면 좌표계가 무의미해지므로
+/// 안전하게 로컬로 복원한다. 호출 스레드에서 커서를 직접 조작하므로
+/// client 의 다른 커서 조작(recv 스레드)과 동일 스레드에서 호출해야 안전하다.
+void client_apply_display_change();
+
 /// host의 EVENT_SYNC_CURSOR 패킷을 처리한다.
 /// 진입 비율을 자신의 화면에 매핑해 커서를 워프한다.
 void client_handle_sync(const MousePacket& pkt);
