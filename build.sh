@@ -87,19 +87,26 @@ elif [ -n "$CUR_VER" ]; then
     echo "버전: $CUR_VER → $NEW_VER (빌드 $NEW_BUILD)"
 fi
 
+# 빌드 구성 선택. 기본 Release(성능 최적화 -O3, DEBUG 로그 제거).
+# `bash build.sh debug` → Debug(-O0, DEBUG 매크로 → BCONN_DEBUG 상세 로그 활성화).
+CONFIG="Release"
+if [[ "$1" == "debug" ]]; then
+    CONFIG="Debug"
+fi
+
 ARCH=$(uname -m)
-echo "빌드 중... (아키텍처: $ARCH)"
+echo "빌드 중... (아키텍처: $ARCH, 구성: $CONFIG)"
 
 (cd bconn-ui && xcodegen generate --quiet && \
   xcodebuild -project BconnApp.xcodeproj \
              -scheme BconnApp \
-             -configuration Release \
+             -configuration "$CONFIG" \
              -derivedDataPath build \
              -arch "$ARCH" \
              -quiet 2>&1)
 
 rm -rf bin/Bconn.app
-cp -R "bconn-ui/build/Build/Products/Release/Bconn.app" bin/Bconn.app
+cp -R "bconn-ui/build/Build/Products/$CONFIG/Bconn.app" bin/Bconn.app
 
 # quarantine 속성 제거 후 재서명 — Gatekeeper가 adhoc 서명 앱을 거부하는 것을 방지
 xattr -cr bin/Bconn.app
