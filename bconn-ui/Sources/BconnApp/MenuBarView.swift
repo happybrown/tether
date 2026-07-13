@@ -12,9 +12,15 @@ struct MenuBarView: View {
     @State private var copiedIP: String?
 
     /// 설정 창을 지정한 탭으로 연다. 탭을 먼저 설정한 뒤 창을 띄운다.
+    /// 전체화면(별도 Space)·멀티 모니터에서도 "지금 보던 화면"에 뜨도록 보정한다.
     private func openSettings(_ tab: SettingsTab = .connection) {
         settingsTab = tab
-        openWindow(id: "settings")
+        // 클릭한 이 순간의 마우스 위치가 사용자가 보던 화면을 가장 정확히 가리킨다.
+        // 창 생성은 비동기라 나중에 조회하면 팝오버가 닫히며 위치가 흐트러질 수 있어,
+        // 대상 화면을 여기서 캡처해 넘긴다.
+        let screen = SettingsWindow.screenUnderMouse()
+        openWindow(id: SettingsWindow.id)
+        SettingsWindow.present(on: screen)
     }
 
     var body: some View {

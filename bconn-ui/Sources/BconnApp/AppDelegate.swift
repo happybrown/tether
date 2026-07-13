@@ -30,6 +30,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         installSignalHandlers()
 
+        // SwiftUI Window scene 은 종료 시 열려 있던 창을 다음 실행에서 자동 복원한다.
+        // 메뉴바 앱이므로 시작 시 설정 창이 뜨지 않도록 복원된 창을 닫는다.
+        // (launch 직후 창이 붙기 전이라 다음 런루프에서 실행)
+        DispatchQueue.main.async {
+            SettingsWindow.closeIfOpen()
+        }
+
         let s = AppSettings.shared
 
         // 최초 실행 시 시스템 권한 prompt 표시 (이후에는 자동으로 안 뜸).

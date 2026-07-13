@@ -10,7 +10,7 @@ struct BconnApp: App {
 
     var body: some Scene {
         // ── 설정 창 (로그 탭 포함) ────────────────────────────────
-        Window("bconn 설정", id: "settings") {
+        Window("bconn 설정", id: SettingsWindow.id) {
             SettingsView(selectedTab: $settingsTab)
         }
         .windowResizability(.contentMinSize)
