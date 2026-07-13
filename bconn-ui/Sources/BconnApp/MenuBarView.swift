@@ -267,20 +267,10 @@ struct MenuBarView: View {
     @ViewBuilder
     private var actionButtons: some View {
         if manager.isRunning {
-            VStack(spacing: 8) {
-                if manager.status == .remote {
-                    ActionButton(
-                        icon: "arrow.uturn.backward",
-                        label: "강제 로컬 복귀",
-                        tint: .orange,
-                        help: "다른 Mac 으로 넘어간 입력을 되찾습니다 (Ctrl+Opt+Cmd+Esc)"
-                    ) { bconn_force_local() }
-                }
-                ActionButton(icon: "stop.fill", label: "중지", tint: .red,
-                             help: "세션 종료") {
-                    manager.stop()
-                    dismissMenuBar()
-                }
+            ActionButton(icon: "stop.fill", label: "중지", tint: .red,
+                         help: "세션 종료") {
+                manager.stop()
+                dismissMenuBar()
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
