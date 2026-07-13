@@ -224,6 +224,20 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
+                    Divider().padding(.leading, 16)
+                    FormRow(label: "원격 복귀 예측") {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Toggle("", isOn: $settings.predictLeave)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .onChange(of: settings.predictLeave) { manager.updatePredictLeave($0) }
+                            Text("반대편 경계 이탈을 Host 가 직접 예측해 지연 없이 복귀합니다.\n끄면 Client 신호로만 복귀합니다(약간 느리지만 오탐 없음).")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 } else {
                     FormRow(label: "Host IP") {
                         TextField("예: 192.168.0.10", text: $settings.hostIP)

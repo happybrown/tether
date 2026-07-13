@@ -53,6 +53,9 @@ class AppSettings: ObservableObject {
     @Published var reconnectInterval: Int {
         didSet { save() }
     }
+    @Published var predictLeave: Bool {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -65,6 +68,8 @@ class AppSettings: ObservableObject {
         autoStart          = defaults.bool(forKey: "autoStart")
         psk                = defaults.string(forKey: "psk") ?? ""
         reconnectInterval  = defaults.integer(forKey: "reconnectInterval").nonZero ?? 5
+        // 기본값 true. bool(forKey:)는 미설정 시 false 라 키 존재 여부로 판단한다.
+        predictLeave       = defaults.object(forKey: "predictLeave") as? Bool ?? true
     }
 
     private func save() {
@@ -76,6 +81,7 @@ class AppSettings: ObservableObject {
         defaults.set(autoStart,           forKey: "autoStart")
         defaults.set(reconnectInterval,   forKey: "reconnectInterval")
         defaults.set(psk,                 forKey: "psk")
+        defaults.set(predictLeave,        forKey: "predictLeave")
     }
 }
 

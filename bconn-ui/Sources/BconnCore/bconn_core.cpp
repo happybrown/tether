@@ -61,6 +61,10 @@ static std::thread       g_ping_thread;
 static std::atomic<bool> g_ping_running{false};
 static uint16_t          g_reconnect_interval_s = 5;
 
+// host: 자체 복귀 예측 사용 여부. EventTap 콜백(다른 스레드)에서 읽으므로 atomic.
+// 기본 true(현재 동작 유지). 끄면 client LeavePacket 안전망으로만 복귀한다.
+std::atomic<bool>        g_predict_leave{true};
+
 // host: watchdog — 이중 타임아웃
 //   PEER_WARNING_S       : 연결 unhealthy 경고
 //   PEER_TIMEOUT_S       : peer 초기화 + 원격 모드 강제 종료
@@ -181,6 +185,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     g_hostname[sizeof(g_hostname) - 1] = '\0';
     g_auth_ok.store(false, std::memory_order_release);
     g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
+    g_predict_leave.store(g_cfg.predict_leave, std::memory_order_relaxed);
     // 원격 모드 빠른 복귀 타임아웃: PING 주기의 2배(최소 10초). PING 1회 유실로 복귀 방지.
     g_remote_fast_timeout_s = std::max(10, g_reconnect_interval_s * 2);
     // 시작 직후 경계에 커서가 있어도 즉시 원격 진입하지 않도록 보호 시각을 현재로 설정한다.
@@ -688,6 +693,13 @@ void bconn_set_client_edge(BconnEdge edge) {
     // 이 API 는 "실행 중" host 의 경계를 재시작 없이 실시간 갱신하는 용도다.
     if (g_status.load() == BCONN_STATUS_IDLE || !g_cfg.is_host) return;
     apply_client_edge(edge);
+}
+
+void bconn_set_predict_leave(bool enabled) {
+    // 실행 여부와 무관하게 플래그를 갱신한다. 실행 전 설정은 bconn_start 가 config 로
+    // 덮어쓰지만, 실행 중 토글은 재시작 없이 다음 이동 이벤트부터 즉시 반영된다.
+    g_predict_leave.store(enabled, std::memory_order_relaxed);
+    g_cfg.predict_leave = enabled;  // 이후 재시작 시에도 유지
 }
 
 void bconn_displays_changed() {

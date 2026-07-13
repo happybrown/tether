@@ -103,6 +103,7 @@ class BconnManager: ObservableObject {
         }
 
         config.reconnect_interval_s = UInt16(settings.reconnectInterval)
+        config.predict_leave = settings.predictLeave
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         bconn_start(&config, { status, msg, ctx in
@@ -135,6 +136,11 @@ class BconnManager: ObservableObject {
     /// 실행 전이면 다음 start() 에서 설정값이 그대로 적용된다.
     func updateClientEdge(_ edge: ClientEdge) {
         bconn_set_client_edge(BconnEdge(UInt32(edge.rawValue)))
+    }
+
+    /// 원격 복귀 예측 on/off 를 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
+    func updatePredictLeave(_ enabled: Bool) {
+        bconn_set_predict_leave(enabled)
     }
 
     // MARK: - Escape Shortcuts

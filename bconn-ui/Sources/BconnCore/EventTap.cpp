@@ -24,6 +24,7 @@ extern std::atomic<int32_t>     g_client_height;
 extern RemoteState              g_remote;
 extern std::atomic<CFRunLoopRef> g_run_loop;
 extern std::atomic<bool>        g_taps_active;
+extern std::atomic<bool>        g_predict_leave;  // host 자체 복귀 예측 on/off
 
 void set_status(BconnStatus s, const char* msg);
 
@@ -331,8 +332,9 @@ static bool host_predict_leave(int16_t dx, int16_t dy) {
         ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
         break;
     }
-    if (!leave) {
-        // 이탈 아님 — 위치 갱신 후 계속 원격
+    // 예측이 꺼져 있으면 복귀 판정은 하지 않되, 가상 위치 누적은 유지한다.
+    // (LeavePacket 안전망이 정상 복귀시키고, 실행 중 다시 켰을 때 위치가 정확해진다.)
+    if (!leave || !g_predict_leave.load(std::memory_order_relaxed)) {
         g_remote.client_x = std::clamp(nx, 0.0, cw - 1.0);
         g_remote.client_y = std::clamp(ny, 0.0, ch - 1.0);
         return false;

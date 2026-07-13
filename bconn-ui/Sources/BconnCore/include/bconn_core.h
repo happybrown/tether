@@ -29,6 +29,7 @@ typedef struct {
     BconnEdge client_edge;  // client가 host 기준 어느 방향에 있는지
     char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
     uint16_t  reconnect_interval_s; // client: PING/HELLO 재전송 간격(초), 0이면 기본값(5초)
+    bool      predict_leave; // host: 자체 복귀 예측 사용 여부 (false면 LeavePacket 안전망만)
 } BconnConfig;
 
 #ifndef BCONN_LOG_LEVEL_DEFINED
@@ -73,6 +74,10 @@ void bconn_force_local(void);
 // 실행 중에도 세션 재시작 없이 커서 전환 경계를 즉시 갱신한다.
 // 실행 전에 호출하면 다음 bconn_start 에 반영된다.
 void bconn_set_client_edge(BconnEdge edge);
+
+// host 자체 복귀 예측 사용 여부를 실시간으로 변경한다 (host 모드 전용).
+// 끄면 client 의 LeavePacket 안전망으로만 복귀한다(왕복 지연 있음, 오탐 없음).
+void bconn_set_predict_leave(bool enabled);
 
 // Cmd+Shift+Esc 감지 시 호출될 콜백 등록 (host 모드 전용).
 // cb 는 CGEventTap RunLoop 스레드에서 호출되므로 내부에서 비동기 처리해야 한다.
