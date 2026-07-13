@@ -64,13 +64,15 @@ static uint16_t          g_reconnect_interval_s = 5;
 // host: watchdog — 이중 타임아웃
 //   PEER_WARNING_S       : 연결 unhealthy 경고
 //   PEER_TIMEOUT_S       : peer 초기화 + 원격 모드 강제 종료
-//   REMOTE_FAST_TIMEOUT_S: 원격 모드 활성 시 빠른 복귀 (입력 먹통 방지)
+//   g_remote_fast_timeout_s: 원격 모드 활성 시 빠른 복귀 (입력 먹통 방지)
+//     PING 주기의 2배(최소 10초)로 잡아 PING 1회 유실만으로 복귀하지 않게 한다.
+//     클라이언트 pong_timeout_remote_s 와 동일한 마진 — 양측 비대칭을 없앤다.
 static std::thread            g_watchdog_thread;
 static std::atomic<bool>      g_watchdog_running{false};
 static std::atomic<time_t>    g_last_ping_time{0};
 static const int              PEER_WARNING_S        = 8;
 static const int              PEER_TIMEOUT_S        = 15;
-static const int              REMOTE_FAST_TIMEOUT_S = 5;
+static int                    g_remote_fast_timeout_s = 10;
 
 // client: 마지막 PONG 수신 시각 (Host 생존 확인)
 static std::atomic<time_t>    g_last_pong_time{0};
@@ -174,6 +176,8 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
     g_hostname[sizeof(g_hostname) - 1] = '\0';
     g_auth_ok.store(false, std::memory_order_release);
     g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
+    // 원격 모드 빠른 복귀 타임아웃: PING 주기의 2배(최소 10초). PING 1회 유실로 복귀 방지.
+    g_remote_fast_timeout_s = std::max(10, g_reconnect_interval_s * 2);
     // 시작 직후 경계에 커서가 있어도 즉시 원격 진입하지 않도록 보호 시각을 현재로 설정한다.
     g_remote.return_time = std::chrono::steady_clock::now();
 
@@ -241,8 +245,10 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
         // host: PING 수신 → 마지막 수신 시각 갱신 + PONG 응답
         auto on_ping = [](const sockaddr_in&) {
             g_last_ping_time.store(time(nullptr), std::memory_order_release);
-            BCONN_DEBUG(CAT_AUTH, "[호스트] PING 수신 → PONG 전송");
-            g_engine->send_pong();
+            // 현재 원격 활성 상태를 PONG 에 실어 client 가 커서 상태를 자가교정하게 한다.
+            uint8_t active = g_remote.active.load(std::memory_order_acquire) ? 1 : 0;
+            BCONN_DEBUG(CAT_AUTH, "[호스트] PING 수신 → PONG 전송 (active=%u)", active);
+            g_engine->send_pong(active);
         };
 
         auto on_clipboard_host = [](const uint8_t* data, uint32_t len) {
@@ -282,7 +288,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 double elapsed = difftime(time(nullptr), last);
 
                 // 원격 모드 중 빠른 복귀: 짧은 타임아웃으로 먹통 최소화
-                if (in_remote && elapsed >= REMOTE_FAST_TIMEOUT_S) {
+                if (in_remote && elapsed >= g_remote_fast_timeout_s) {
                     BCONN_ERROR(CAT_AUTH, "[호스트] 원격 모드 중 PING 무응답 (%.0fs) — 즉시 로컬 복귀", elapsed);
                     force_leave_remote("원격 모드 중 연결 끊김");
                     if (elapsed >= PEER_TIMEOUT_S) {
@@ -411,10 +417,31 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             }
         };
 
-        // PONG 수신: 호스트가 살아있음을 확인
-        auto on_pong = []() {
+        // PONG 수신: 호스트가 살아있음을 확인. + 커서 상태 자가교정.
+        // host_active 와 client 의 원격 상태(pos_init)가 어긋나면 제어 신호(SHOW/SYNC)
+        // 유실로 커서 상태가 틀어진 것이므로 바로잡는다. recv 스레드 단일 실행이라
+        // client_handle_* 와 동일 스레드 — 커서 조작에 별도 동기화 불필요.
+        auto on_pong = [](uint8_t host_active) {
             g_last_pong_time.store(time(nullptr), std::memory_order_release);
-            BCONN_DEBUG(CAT_AUTH, "[클라이언트] PONG 수신");
+            if (!g_auth_ok.load(std::memory_order_acquire)) return;
+
+            // host 로컬(0) 인데 client 는 원격(pos_init=true): SHOW_CURSOR 유실 →
+            // 양측에 커서가 동시 표시된 상태. client 커서를 숨기고 로컬로 되돌린다.
+            if (host_active == 0 && g_client.pos_init) {
+                BCONN_INFO(CAT_CURSOR, "[클라이언트] 상태 불일치 교정: host 로컬인데 원격 유지 → 커서 숨김");
+                g_client.pos_init = false;
+                if (!g_client.cursor_hidden) {
+                    bconn_hide_cursor();
+                    g_client.cursor_hidden = true;
+                }
+                set_status(BCONN_STATUS_CONNECTED, "연결됨");
+            }
+            // host 원격(1) 인데 client 는 로컬(pos_init=false): SYNC_CURSOR 유실.
+            // 위치 비율 정보가 없어 여기서 커서를 복원하지 않는다. host 가 다음 이동/복귀
+            // 패킷으로 재동기화하며, 그때까지 잠깐 양측 커서가 안 보일 수 있다(무해).
+            else if (host_active == 1 && !g_client.pos_init) {
+                BCONN_DEBUG(CAT_CURSOR, "[클라이언트] 상태 불일치 감지: host 원격인데 로컬 (SYNC 대기)");
+            }
         };
 
         auto on_clipboard_client = [](const uint8_t* data, uint32_t len) {
@@ -448,11 +475,23 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             const int pong_timeout_s = std::max(15, interval_s * 3);
             // 원격 모드 활성 시 빠른 감지 (입력 먹통 방지)
             const int pong_timeout_remote_s = std::max(10, interval_s * 2);
+            // 원격 모드 중에는 PING 을 1초 주기로 촘촘히 보낸다.
+            // host 는 client PING 도착으로만 연결 생존을 판단하는데, 원격 중 데이터는
+            // host→client 단방향이라 역방향(PING)이 성기면 유실 하나에 host watchdog 이
+            // 오탐 복귀한다. 1초 heartbeat 이면 유실 하나가 나도 다음 것이 곧 도착한다.
+            const int REMOTE_PING_INTERVAL_MS = 1000;
+
+            // 100ms 틱 루프. 원격 여부에 따라 PING 전송 주기를 동적으로 정한다.
+            int elapsed_ms = 0;
             while (g_ping_running.load(std::memory_order_acquire)) {
-                // 100ms 단위로 쪼개 sleep → 빠른 종료 응답
-                for (int i = 0; i < interval_s * 10 && g_ping_running.load(); ++i)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (!g_ping_running.load(std::memory_order_acquire)) break;
+                elapsed_ms += 100;
+
+                bool in_remote = g_client.pos_init;
+                int send_interval_ms = in_remote ? REMOTE_PING_INTERVAL_MS : interval_s * 1000;
+                if (elapsed_ms < send_interval_ms) continue;
+                elapsed_ms = 0;
 
                 if (g_auth_ok.load(std::memory_order_acquire)) {
                     BCONN_DEBUG(CAT_AUTH, "[클라이언트] PING 전송");
@@ -462,7 +501,6 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                     if (last != 0) {
                         double elapsed = difftime(time(nullptr), last);
                         // 원격 모드 중이면 짧은 타임아웃 적용
-                        bool in_remote = g_client.pos_init;
                         int timeout = in_remote ? pong_timeout_remote_s : pong_timeout_s;
                         if (elapsed >= timeout) {
                             client_reset_on_host_dead(

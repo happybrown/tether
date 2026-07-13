@@ -256,7 +256,9 @@ static void enter_remote(CGPoint loc) {
     pkt.event_type = EVENT_SYNC_CURSOR;
     pkt.dx = static_cast<int16_t>(g_cfg.client_edge);
     pkt.dy = static_cast<int16_t>(ratio * 32767.0);
-    g_engine->send_mouse(pkt);
+    // 상태 전환 신호는 유실 시 양측 커서 상태가 어긋나므로 3회 연속 전송해 방어한다.
+    // (지속 유실·엣지케이스는 PONG 의 active 비트 자가교정이 백업)
+    for (int i = 0; i < 3; ++i) g_engine->send_mouse(pkt);
 
     BCONN_INFO(CAT_CURSOR,
         "[호스트] 원격 모드 진입: edge=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f)",
@@ -283,7 +285,9 @@ static void leave_remote() {
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SHOW_CURSOR;
-    g_engine->send_mouse(pkt);
+    // 복귀 신호 유실 시 client 가 원격 상태로 남아 양측에 커서가 동시 표시된다.
+    // 3회 연속 전송으로 즉각 유실을 방어한다 (PONG active 비트 자가교정이 백업).
+    for (int i = 0; i < 3; ++i) g_engine->send_mouse(pkt);
 
     set_status(BCONN_STATUS_CONNECTED, "연결됨");
 }
@@ -296,28 +300,34 @@ static bool host_predict_leave(int16_t dx, int16_t dy) {
     double cw = (double)g_client_width.load(std::memory_order_relaxed);
     double ch = (double)g_client_height.load(std::memory_order_relaxed);
 
-    // clamp 전 위치로 경계 이탈을 예측한다. 빠른 이동에서 큰 delta 가 경계를
-    // 훌쩍 넘겨도 이번 이벤트에서 즉시 복귀 판정한다 (커서가 경계에 붙는 프레임 방지).
-    double nx = g_remote.client_x + dx;
-    double ny = g_remote.client_y + dy;
+    // 직전 실제(clamp된) 위치. 이탈은 "이미 경계 근방에 도달해 있는" 상태에서만 인정한다.
+    double px = g_remote.client_x;
+    double py = g_remote.client_y;
 
+    double nx = px + dx;
+    double ny = py + dy;
+
+    // 이탈 판정은 clamp 전 nx/ny 가 아니라 "직전 위치가 경계 margin 안"인지로 한다.
+    // 중앙에서 큰 delta 한 방(마구 흔들기)에 nx 가 경계를 훌쩍 넘어도, 커서는 실제로는
+    // 아직 경계에 붙지 않았으므로 복귀시키지 않는다. client 는 clamp 된 위치로 판정하므로
+    // 이렇게 해야 양측 기준이 일치하고 오탐(의도치 않은 복귀)이 사라진다.
     bool leave = false;
     double ratio = 0.5;   // 경계 평행 축 비율 (복귀 위치)
     switch (g_cfg.client_edge) {
     case BCONN_EDGE_RIGHT:  // 왼쪽 경계로 이탈
-        leave = (nx <= EDGE_MARGIN && dx < 0);
+        leave = (px <= EDGE_MARGIN && dx < 0);
         ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
         break;
     case BCONN_EDGE_LEFT:   // 오른쪽 경계로 이탈
-        leave = (nx >= cw - 1.0 - EDGE_MARGIN && dx > 0);
+        leave = (px >= cw - 1.0 - EDGE_MARGIN && dx > 0);
         ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
         break;
     case BCONN_EDGE_BOTTOM: // 위쪽 경계로 이탈
-        leave = (ny <= EDGE_MARGIN && dy < 0);
+        leave = (py <= EDGE_MARGIN && dy < 0);
         ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
         break;
     case BCONN_EDGE_TOP:    // 아래쪽 경계로 이탈
-        leave = (ny >= ch - 1.0 - EDGE_MARGIN && dy > 0);
+        leave = (py >= ch - 1.0 - EDGE_MARGIN && dy > 0);
         ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
         break;
     }
@@ -367,8 +377,14 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
                       type == kCGEventRightMouseDown  || type == kCGEventRightMouseUp ||
                       type == kCGEventOtherMouseDown  || type == kCGEventOtherMouseUp);
 
-    // 스크롤 이외의 이벤트는 커서를 항상 offscreen으로 유지
-    if (!is_scroll)
+    // 커서 offscreen 유지 보정.
+    // 진입 시 CGAssociateMouseAndMouseCursorPosition(false) 로 연동을 끊어 물리 마우스가
+    // 시스템 커서를 움직이지 않으므로, 매 이동 이벤트마다 warp 할 필요가 없다.
+    // 매 이벤트 동기 CGWarp(Mach RPC)는 콜백을 블로킹해 tap 처리를 지연시키고
+    // (kCGEventTapDisabledByTimeout 유발) 원격 커서가 느려지는 주 원인이었다.
+    // 클릭/드래그처럼 OS 가 커서를 되살릴 수 있는 이벤트에서만 재보정하고,
+    // 순수 이동(kCGEventMouseMoved)에서는 생략한다.
+    if (!is_scroll && type != kCGEventMouseMoved)
         CGWarpMouseCursorPosition(offscreen_point());
 
     if (is_click) {

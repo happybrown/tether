@@ -19,10 +19,18 @@ static inline int make_udp_sock() {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) return -1;
 
-    // 송신 버퍼 최소화: 오래된 패킷이 쌓이지 않도록
-    // 수신 버퍼는 패킷 유실 방지를 위해 충분히 유지
-    int sndbuf = 4096;
+    // 송신 버퍼: 빠른 마우스 이동 시 9B 패킷이 버스트로 몰려도 드롭되지 않게 충분히 확보.
+    // 4KB(≈450패킷)는 버스트에서 커널 송신 큐를 넘겨 send() 드롭 → 원격 커서 끊김을 유발했다.
+    // 패킷이 작아 버퍼를 키워도 실제 지연은 늘지 않는다 (커널이 즉시 NIC 로 flush).
+    int sndbuf = 64 * 1024;
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+    // 수신 버퍼: 원격 중 host→client 마우스 패킷이 버스트로 몰려도 유실되지 않게 확보.
+    // recv 스레드가 CGWarp/CGEventPost(동기 Mach RPC)로 잠시 블로킹되는 사이 도착한
+    // 패킷이 커널 큐에 쌓이는데, 기본값이 작으면 넘쳐서 드롭된다. host 는 이 드롭으로
+    // client PING(생존 신호)을 놓쳐 watchdog 오탐 복귀를 일으킬 수 있다.
+    int rcvbuf = 256 * 1024;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
     // DSCP EF(Expedited Forwarding) — 라우터에서 최우선 처리
     int tos = IPTOS_LOWDELAY;
@@ -47,7 +55,9 @@ public:
     using HelloRecvCallback      = std::function<void(const HelloPacket&, const sockaddr_in&)>;
     using AuthAckRecvCallback    = std::function<void(const AuthAckPacket&)>;
     using PingRecvCallback       = std::function<void(const sockaddr_in&)>;
-    using PongRecvCallback       = std::function<void()>;
+    // PONG 은 host 의 현재 원격 활성 상태(1=원격, 0=로컬)를 함께 실어보낸다.
+    // client 가 이 값과 자신의 커서 상태를 대조해 어긋나면 자가교정한다.
+    using PongRecvCallback       = std::function<void(uint8_t host_active)>;
     using ClipboardRecvCallback  = std::function<void(const uint8_t* data, uint32_t len)>;
     using ClientInfoRecvCallback = std::function<void(const ClientInfoPacket&)>;
     using DisconnectCallback     = std::function<void()>;
@@ -170,10 +180,11 @@ public:
         send_raw_any(&pkt, 1);
     }
 
-    // host → client: PING 응답 (peer_known 필요)
-    void send_pong() {
-        uint8_t pkt = PACKET_PONG;
-        send_raw(&pkt, 1);
+    // host → client: PING 응답 (peer_known 필요).
+    // host_active: 현재 원격 모드 활성 여부(1/0). client 가 커서 상태 자가교정에 사용.
+    void send_pong(uint8_t host_active) {
+        uint8_t pkt[2] = { PACKET_PONG, host_active };
+        send_raw(pkt, sizeof(pkt));
     }
 
     // 클립보드 텍스트 전송 (양방향)
@@ -305,8 +316,10 @@ private:
             on_auth_ack(p);
         } else if (type == PACKET_PING && n == 1 && on_ping) {
             on_ping(sender);
-        } else if (type == PACKET_PONG && n == 1 && on_pong) {
-            on_pong();
+        } else if (type == PACKET_PONG && (n == 1 || n == 2) && on_pong) {
+            // 2바이트: [PONG, host_active]. 1바이트: 구버전 호환(active 미상 → 1로 간주).
+            uint8_t host_active = (n == 2) ? buf[1] : 1;
+            on_pong(host_active);
         } else if (type == PACKET_CLIPBOARD && n >= 5 && on_clipboard) {
             uint32_t len = 0;
             memcpy(&len, buf + 1, 4);
