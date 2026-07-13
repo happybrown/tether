@@ -32,6 +32,26 @@ ScreenBounds get_screen_bounds() {
     return b;
 }
 
+// ── 커서 숨김 (offscreen warp) ────────────────────────────────────────
+
+void client_hide_cursor_offscreen() {
+    // 전체 화면 영역의 우하단 바깥으로 커서를 warp 한다. hide 와 달리 메뉴바 앱에서도
+    // 확실히 동작하며, 물리 마우스 이동 시 OS 가 커서를 도로 화면 안으로 데려온다.
+    ScreenBounds s = get_screen_bounds();
+    CGWarpMouseCursorPosition(CGPointMake(s.right + 9999.0, s.bottom + 9999.0));
+    // warp 좌표가 실제 커서 위치로 반영되도록 연동을 잠깐 유지한다.
+    CGAssociateMouseAndMouseCursorPosition(true);
+}
+
+void client_show_cursor_onscreen() {
+    // 연결 종료·장애 복원 시 사용. offscreen 으로 밀어둔 커서를 화면 중앙으로 되돌려
+    // 사용자가 즉시 커서를 찾을 수 있게 한다.
+    ScreenBounds s = get_screen_bounds();
+    CGWarpMouseCursorPosition(CGPointMake(s.left + s.width() * 0.5,
+                                          s.top  + s.height() * 0.5));
+    CGAssociateMouseAndMouseCursorPosition(true);
+}
+
 // ── 클라이언트 정보 전송 ──────────────────────────────────────────────
 
 void send_client_info() {
@@ -55,7 +75,7 @@ void client_apply_display_change() {
     if (g_client.pos_init) {
         g_client.pos_init = false;
         if (g_client.cursor_hidden) {
-            bconn_show_cursor();
+            client_show_cursor_onscreen();
             g_client.cursor_hidden = false;
         }
         BCONN_INFO(CAT_CURSOR, "[클라이언트] 디스플레이 변경 — 원격 모드 로컬 복원");
@@ -95,11 +115,10 @@ void client_handle_sync(const MousePacket& pkt) {
     }
 
     g_client.pos_init = true;
+    // 진입 위치로 warp 하면 커서가 화면 안에 다시 나타난다(복귀 시 밖으로 밀었던 것을 되돌림).
     CGWarpMouseCursorPosition(CGPointMake(g_client.cur_x, g_client.cur_y));
-    // CGWarpMouseCursorPosition 호출 후 macOS가 커서를 숨기는 것을 방지.
-    // Warp 직후 마우스 이동 이벤트를 posting해 커서 표시를 강제한다.
     CGAssociateMouseAndMouseCursorPosition(true);
-    if (g_client.cursor_hidden) { bconn_show_cursor(); g_client.cursor_hidden = false; }
+    g_client.cursor_hidden = false;
 
     BCONN_INFO(CAT_CURSOR,
         "[클라이언트] 커서 동기화 완료: 호스트 경계=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f), 화면영역=(%.0f, %.0f ~ %.0f, %.0f)",
@@ -150,9 +169,11 @@ static bool client_check_leave(int16_t dx, int16_t dy) {
     int16_t r = static_cast<int16_t>(std::clamp(ratio, 0.0, 1.0) * 32767.0);
     g_engine->send_leave(static_cast<uint8_t>(g_client.entry_edge), r, 0, 0);
 
-    // 로컬 원격 상태 해제 — 이후 host 패킷은 EVENT_SHOW_CURSOR 로 재동기화된다.
+    // 로컬 원격 상태 해제 + 커서를 화면 밖으로 감춘다 (커서 제어가 host 로 넘어감).
+    // 이후 host 패킷은 EVENT_SHOW_CURSOR 로 재동기화된다.
     g_client.pos_init = false;
-    if (g_client.cursor_hidden) { bconn_show_cursor(); g_client.cursor_hidden = false; }
+    client_hide_cursor_offscreen();
+    g_client.cursor_hidden = true;
 
     BCONN_INFO(CAT_CURSOR, "[클라이언트] 반대편 경계 이탈 → 복귀 요청: edge=%d, 비율=%.3f",
                g_client.entry_edge, ratio);

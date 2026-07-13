@@ -56,3 +56,12 @@ void client_handle_move(const MousePacket& pkt);
 
 /// host의 키보드 패킷을 CGEventPost로 주입한다.
 void client_handle_key(const KeyPacket& pkt);
+
+/// 호스트로 복귀할 때 클라이언트 커서를 화면 밖으로 밀어 보이지 않게 한다.
+/// 메뉴바 앱(창 없음)에서는 CGDisplayHideCursor/NSCursor.hide 가 실제로 커서를
+/// 숨기지 못하므로(포커스 조건 불충족), host 원격 모드와 동일하게 offscreen warp 로
+/// 커서를 감춘다. 물리 마우스를 움직이면 자연스럽게 다시 나타난다(정상 동작).
+void client_hide_cursor_offscreen();
+
+/// 연결 종료·장애 복원 시 offscreen 커서를 화면 중앙으로 되돌린다.
+void client_show_cursor_onscreen();

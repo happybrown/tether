@@ -377,14 +377,10 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                 set_status(BCONN_STATUS_REMOTE, "원격 모드");
                 break;
             case EVENT_SHOW_CURSOR:
-                BCONN_INFO(CAT_CURSOR, "[클라이언트] 커서 숨김 (호스트 복귀)");
-                // 호스트가 로컬로 복귀했으므로 클라이언트 커서를 숨긴다.
-                // 커서-포인터 연동이 true 인 상태(원격 모드 중 유지됨)에서 hide 하면,
-                // 이후 클라의 물리 마우스가 움직이거나 원격 재진입 시 OS가 커서를 되살린다.
-                if (!g_client.cursor_hidden) {
-                    bconn_hide_cursor();
-                    g_client.cursor_hidden = true;
-                }
+                // 호스트가 로컬로 복귀 → 클라이언트 커서를 화면 밖으로 밀어 감춘다.
+                // (메뉴바 앱에서 CGDisplayHideCursor 가 안 먹으므로 offscreen warp 사용)
+                client_hide_cursor_offscreen();
+                g_client.cursor_hidden = true;
                 g_client.pos_init = false;
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");
                 break;
@@ -435,10 +431,8 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
             if (host_active == 0 && g_client.pos_init) {
                 BCONN_INFO(CAT_CURSOR, "[클라이언트] 상태 불일치 교정: host 로컬인데 원격 유지 → 커서 숨김");
                 g_client.pos_init = false;
-                if (!g_client.cursor_hidden) {
-                    bconn_hide_cursor();
-                    g_client.cursor_hidden = true;
-                }
+                client_hide_cursor_offscreen();
+                g_client.cursor_hidden = true;
                 set_status(BCONN_STATUS_CONNECTED, "연결됨");
             }
             // host 원격(1) 인데 client 는 로컬(pos_init=false): SYNC_CURSOR 유실.
@@ -607,15 +601,14 @@ static void client_reset_on_host_dead(const char* reason) {
     BCONN_ERROR(CAT_AUTH, "[클라이언트] 호스트 연결 끊김 감지: %s", reason);
     g_auth_ok.store(false, std::memory_order_release);
 
-    // 즉시 입력 복원 — 원격 모드 중이었다면 커서를 되살리고 위치를 초기화
+    // 즉시 입력 복원 — 원격 모드 중이었다면 커서를 화면 안으로 되돌리고 위치를 초기화
     if (g_client.pos_init) {
         g_client.pos_init = false;
         if (g_client.cursor_hidden) {
-            bconn_show_cursor();
+            client_show_cursor_onscreen();
             g_client.cursor_hidden = false;
         }
     }
-    // Client는 CGAssociate를 사용하지 않지만, 만일을 대비해 복원
     CGAssociateMouseAndMouseCursorPosition(true);
 
     g_last_pong_time.store(0, std::memory_order_release);
@@ -657,7 +650,11 @@ void bconn_stop() {
     }
 
     CGAssociateMouseAndMouseCursorPosition(true);
-    bconn_show_cursor();
+    // Client 원격 중 종료 시, offscreen 으로 밀어둔 커서를 화면 안으로 되돌린다.
+    if (g_client.cursor_hidden) {
+        client_show_cursor_onscreen();
+        g_client.cursor_hidden = false;
+    }
     g_remote.active.store(false, std::memory_order_release);
     g_remote.entry_x = g_remote.entry_y = 0.0;
     g_remote.return_x = g_remote.return_y = 0.0;
