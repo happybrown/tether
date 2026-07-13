@@ -377,14 +377,12 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
                       type == kCGEventRightMouseDown  || type == kCGEventRightMouseUp ||
                       type == kCGEventOtherMouseDown  || type == kCGEventOtherMouseUp);
 
-    // 커서 offscreen 유지 보정.
-    // 진입 시 CGAssociateMouseAndMouseCursorPosition(false) 로 연동을 끊어 물리 마우스가
-    // 시스템 커서를 움직이지 않으므로, 매 이동 이벤트마다 warp 할 필요가 없다.
-    // 매 이벤트 동기 CGWarp(Mach RPC)는 콜백을 블로킹해 tap 처리를 지연시키고
-    // (kCGEventTapDisabledByTimeout 유발) 원격 커서가 느려지는 주 원인이었다.
-    // 클릭/드래그처럼 OS 가 커서를 되살릴 수 있는 이벤트에서만 재보정하고,
-    // 순수 이동(kCGEventMouseMoved)에서는 생략한다.
-    if (!is_scroll && type != kCGEventMouseMoved)
+    // 커서 offscreen 유지 보정 (스크롤 제외).
+    // CGAssociate(false) 로 연동을 끊어도 시스템 커서의 화면상 위치 자체는 남아 있어,
+    // macOS 가 커서를 화면 안으로 되돌리면 host 커서가 물리 마우스를 따라 보이게 된다.
+    // 따라서 매 이벤트 offscreen 으로 다시 밀어야 host 화면에서 커서가 사라진 상태를 유지한다.
+    // (이 warp 를 생략하면 원격/로컬 양쪽에 커서가 보이고 클릭 dispatch 도 어긋난다.)
+    if (!is_scroll)
         CGWarpMouseCursorPosition(offscreen_point());
 
     if (is_click) {

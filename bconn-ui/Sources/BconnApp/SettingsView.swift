@@ -93,7 +93,7 @@ struct SettingsView: View {
     private var connectionTab: some View {
         tabScroll {
             modeSection
-            if settings.mode == .host && !manager.hasAccessibilityPermission {
+            if !manager.hasAccessibilityPermission {
                 permissionSection
             }
             connectionSection
@@ -171,7 +171,9 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("손쉬운 사용 권한 필요")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Host 모드는 키보드·마우스 이벤트를 가로채기 위해 시스템 권한이 필요합니다.")
+                Text(settings.mode == .host
+                     ? "Host 모드는 키보드·마우스 이벤트를 가로채기 위해 시스템 권한이 필요합니다."
+                     : "Client 모드는 원격 클릭·키 입력을 주입하기 위해 시스템 권한이 필요합니다.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -355,7 +357,9 @@ struct SettingsView: View {
     // ── 헬퍼 ──────────────────────────────────────────────────────
 
     private var canStart: Bool {
-        if settings.mode == .host { return manager.hasAccessibilityPermission }
+        // 두 모드 모두 손쉬운 사용 권한 필요 (host: 캡처, client: 주입).
+        guard manager.hasAccessibilityPermission else { return false }
+        if settings.mode == .host { return true }
         return !settings.hostIP.trimmingCharacters(in: .whitespaces).isEmpty
     }
 

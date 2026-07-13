@@ -181,10 +181,15 @@ void client_handle_move(const MousePacket& pkt) {
 
     CGPoint pos = CGPointMake(g_client.cur_x, g_client.cur_y);
 
-    // kCGEventMouseMoved는 CGEventPost만으로 커서가 이동하지 않는다.
-    // CGWarpMouseCursorPosition으로 실제 커서 위치를 먼저 옮겨야 한다.
-    // Warp 후 커서 숨김 방지를 위해 CGAssociateMouseAndMouseCursorPosition 재확인.
-    if (etype == kCGEventMouseMoved) {
+    bool is_click = (etype == kCGEventLeftMouseDown  || etype == kCGEventLeftMouseUp  ||
+                     etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
+                     etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
+
+    // 커서를 실제 pos 로 옮긴 뒤 이벤트를 post 한다.
+    // 이동뿐 아니라 클릭에도 warp 가 필요하다: 클릭 시점에 시스템 커서가 pos 에 있지 않으면
+    // (직전 이동 warp 반영 지연, 물리 마우스 개입 등) macOS 가 클릭을 엉뚱한 위치에 넣거나
+    // 무시해 원격 클릭이 먹통이 된다. 클릭은 down/up 이 짧게 이어지므로 각각 위치를 보장한다.
+    if (etype == kCGEventMouseMoved || is_click) {
         CGWarpMouseCursorPosition(pos);
         CGAssociateMouseAndMouseCursorPosition(true);
     }
@@ -196,10 +201,6 @@ void client_handle_move(const MousePacket& pkt) {
     else if (etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp ||
              etype == kCGEventOtherMouseDragged)
         btn = kCGMouseButtonCenter;
-
-    bool is_click = (etype == kCGEventLeftMouseDown  || etype == kCGEventLeftMouseUp  ||
-                     etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
-                     etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
 
     CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
     CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, pkt.dx);

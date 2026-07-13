@@ -21,7 +21,10 @@ struct MenuBarView: View {
         VStack(spacing: 0) {
             statusHeader
 
-            if !manager.hasAccessibilityPermission && settings.mode == .host {
+            // 손쉬운 사용 권한은 두 모드 모두 필요하다.
+            // host: CGEventTap 으로 입력을 가로챈다. client: CGEventPost 로 마우스/키를 주입한다.
+            // 권한이 없으면 client 는 커서 이동은 되지만 클릭·키 입력이 조용히 무시된다.
+            if !manager.hasAccessibilityPermission {
                 Divider().padding(.horizontal, 8)
                 permissionBanner
             }
@@ -101,7 +104,9 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("손쉬운 사용 권한 필요")
                         .font(.system(size: 12, weight: .semibold))
-                    Text("Host 모드는 키보드·마우스를 가로채기 위해 권한이 필요합니다. 탭하여 시스템 설정 열기.")
+                    Text(settings.mode == .host
+                         ? "키보드·마우스를 가로채기 위해 권한이 필요합니다. 탭하여 시스템 설정 열기."
+                         : "원격 클릭·키 입력을 주입하려면 권한이 필요합니다. 탭하여 시스템 설정 열기.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -305,7 +310,9 @@ struct MenuBarView: View {
     // ── 헬퍼 ──────────────────────────────────────────────────────────
 
     private var canStart: Bool {
-        let hostReady = settings.mode == .host && manager.hasAccessibilityPermission
+        // 두 모드 모두 손쉬운 사용 권한이 필요하다 (host: 캡처, client: 주입).
+        guard manager.hasAccessibilityPermission else { return false }
+        let hostReady = settings.mode == .host
         let clientReady = settings.mode == .client && isClientReady
         return hostReady || clientReady
     }
