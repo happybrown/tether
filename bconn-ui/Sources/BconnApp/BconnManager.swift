@@ -211,13 +211,23 @@ class BconnManager: ObservableObject {
         }, selfPtr)
     }
 
+    // Universal Clipboard(Handoff) 재동기화 제외 마커.
+    // 이 타입이 붙은 pasteboard 항목은 macOS 가 다른 기기로 다시 동기화하지 않는다
+    // (1Password 등이 비밀번호에 쓰는 관례). bconn 이 이미 UDP 로 빠르게 동기화하므로,
+    // 이 마커로 macOS 의 느린 중복 동기화(“다른 컴퓨터에서 붙여넣는 중…” 창)를 막는다.
+    private static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+
     private func applyReceivedClipboard(_ text: String) {
         guard text != lastReceivedClipboard else { return }
         lastReceivedClipboard = text
         // 로컬 클립보드에 적용 (이 값을 다시 감지해 전송하지 않도록 lastSentClipboard 도 갱신)
         lastSentClipboard = text
+        // setString 대신 NSPasteboardItem 으로 문자열 + 제외 마커를 함께 쓴다.
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setString("", forType: Self.concealedType)
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.writeObjects([item])
         // changeCount를 갱신해 다음 폴링에서 자체 변경을 무시
         lastChangeCount = NSPasteboard.general.changeCount
     }
