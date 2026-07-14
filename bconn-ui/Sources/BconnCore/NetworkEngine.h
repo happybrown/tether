@@ -225,6 +225,12 @@ public:
     // host: 복귀 요청 수신 콜백 등록 (setter — 생성자 인자 비대화 방지)
     void set_leave_callback(std::function<void(const LeavePacket&)> cb) { on_leave = std::move(cb); }
 
+    // 네트워크 성능 측정 probe 수신 콜백 등록 (양방향). 인증 후 언제든 오갈 수 있다.
+    void set_probe_callback(std::function<void(const ProbePacket&)> cb) { on_probe = std::move(cb); }
+
+    // 측정 probe 전송 (요청 또는 응답). 인증 완료 상태에서만 의미가 있다.
+    void send_probe(const ProbePacket& p) { send_raw(&p, sizeof(p)); }
+
     // 하위 호환
     void push_mouse(const MousePacket& p) { send_mouse(p); }
     void push_key(const KeyPacket& p)     { send_key(p); }
@@ -239,6 +245,7 @@ private:
     std::thread recv_thread;
     std::atomic<bool> running{false};
     std::function<void(const LeavePacket&)> on_leave;
+    std::function<void(const ProbePacket&)> on_probe;
     MouseRecvCallback      on_mouse;
     KeyRecvCallback        on_key;
     HelloRecvCallback      on_hello;
@@ -334,6 +341,10 @@ private:
             LeavePacket p;
             std::memcpy(&p, buf, sizeof(p));
             on_leave(p);
+        } else if (type == PACKET_PROBE && n == (ssize_t)sizeof(ProbePacket) && on_probe) {
+            ProbePacket p;
+            std::memcpy(&p, buf, sizeof(p));
+            on_probe(p);
         }
     }
 };

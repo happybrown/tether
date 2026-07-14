@@ -27,6 +27,8 @@
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <vector>
+#include <cmath>
 
 // ── 전역 상태 ─────────────────────────────────────────────────────────
 
@@ -64,6 +66,41 @@ static uint16_t          g_reconnect_interval_s = 5;
 // host: 자체 복귀 예측 사용 여부. EventTap 콜백(다른 스레드)에서 읽으므로 atomic.
 // 기본 true(현재 동작 유지). 끄면 client LeavePacket 안전망으로만 복귀한다.
 std::atomic<bool>        g_predict_leave{true};
+
+// ── 네트워크 성능(RTT) 측정 상태 ──────────────────────────────────────
+// probe 요청을 보낸 seq 별 송신 시각을 기록해두고, 응답(is_ack=1) 수신 시 왕복을 잰다.
+// 측정 스레드와 recv 스레드(probe 콜백)가 공유하므로 mutex 로 보호한다.
+static std::mutex                 g_probe_mu;
+static std::atomic<bool>          g_probe_running{false};
+static std::vector<double>        g_probe_rtts;        // 수집된 RTT(ms)
+static std::vector<int64_t>       g_probe_sent_us;     // seq index → 송신 시각(us), 0=미수신
+static std::condition_variable    g_probe_cv;
+
+// steady_clock 을 마이크로초로.
+static int64_t now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// probe 수신 처리 (host/client 공용, recv 스레드에서 호출).
+//   요청(is_ack=0): 그대로 is_ack=1 로 되돌린다(echo).
+//   응답(is_ack=1): 측정 중이면 seq 로 송신 시각을 찾아 왕복 시간을 기록한다.
+static void handle_probe(const ProbePacket& p) {
+    if (p.is_ack == 0) {
+        ProbePacket ack = p;
+        ack.is_ack = 1;
+        if (g_engine) g_engine->send_probe(ack);
+        return;
+    }
+    if (!g_probe_running.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lk(g_probe_mu);
+    if (p.seq >= g_probe_sent_us.size()) return;
+    int64_t sent = g_probe_sent_us[p.seq];
+    if (sent == 0) return;                 // 이미 처리했거나 무효
+    g_probe_sent_us[p.seq] = 0;            // 중복 응답 방지
+    g_probe_rtts.push_back((now_us() - sent) / 1000.0);
+    g_probe_cv.notify_all();
+}
 
 // host: watchdog — 이중 타임아웃
 //   PEER_WARNING_S       : 연결 unhealthy 경고
@@ -276,6 +313,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                                      on_ping, nullptr, on_clipboard_host,
                                      on_client_info, on_disconnect_host);
         g_engine->set_leave_callback(on_leave);
+        g_engine->set_probe_callback(handle_probe);
         g_engine->start();
 
         // watchdog: 원격 모드 비활성 시 2초 주기, 활성 시 1초 주기로 점검.
@@ -463,6 +501,7 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
                                      on_mouse, on_key, nullptr, on_auth_ack,
                                      nullptr, on_pong, on_clipboard_client,
                                      nullptr, on_disconnect_client);
+        g_engine->set_probe_callback(handle_probe);
         g_engine->start();
 
         BCONN_INFO(CAT_AUTH, "[클라이언트] HELLO 전송: %s:%d (재시도 간격=%us)",
@@ -742,4 +781,91 @@ int bconn_get_local_ips(char* out, int out_size) {
     if (pos < out_size) out[pos] = '\0';
     freeifaddrs(ifap);
     return count;
+}
+
+bool bconn_run_netperf(int count, int interval_ms, BconnNetPerfCallback cb, void* ctx) {
+    if (!cb) return false;
+    // 동시 측정 방지 — 진행 중이면 시작하지 않는다.
+    bool expected = false;
+    if (!g_probe_running.compare_exchange_strong(expected, true)) return false;
+
+    if (count < 1)   count = 1;
+    if (count > 1000) count = 1000;               // 폭주 방지 상한
+    if (interval_ms < 5) interval_ms = 5;
+
+    std::thread([count, interval_ms, cb, ctx]() {
+        // 미연결이면 즉시 빈 결과 반환.
+        // 연결 판정은 모드별로 다르다:
+        //   host  : peer 등록(client 인증 성공)만으로 probe 를 되받을 수 있다.
+        //           g_auth_ok 는 client 전용 상태라 host 에선 항상 false → 여기서 쓰면 안 된다.
+        //   client: host 로부터 AUTH_ACK 를 받아(g_auth_ok) 실제 연결이 확인된 상태여야 한다.
+        bool connected = g_engine && g_engine->is_peer_known() &&
+                         (g_cfg.is_host || g_auth_ok.load(std::memory_order_acquire));
+        if (!connected) {
+            BconnNetPerfResult r{};
+            cb(&r, ctx);
+            g_probe_running.store(false, std::memory_order_release);
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(g_probe_mu);
+            g_probe_rtts.clear();
+            g_probe_sent_us.assign(count, 0);
+        }
+
+        // count 회 probe 를 interval 간격으로 전송.
+        for (int i = 0; i < count; ++i) {
+            ProbePacket p{};
+            p.packet_type = PACKET_PROBE;
+            p.is_ack      = 0;
+            p.seq         = (uint16_t)i;
+            int64_t t     = now_us();
+            p.t_send_us   = t;
+            {
+                std::lock_guard<std::mutex> lk(g_probe_mu);
+                g_probe_sent_us[i] = t;
+            }
+            g_engine->send_probe(p);
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
+        }
+
+        // 마지막 응답을 위해 잠깐 더 대기 (지연이 큰 응답 수집). 최대 1초.
+        {
+            std::unique_lock<std::mutex> lk(g_probe_mu);
+            g_probe_cv.wait_for(lk, std::chrono::milliseconds(1000), [count]() {
+                return (int)g_probe_rtts.size() >= count;
+            });
+        }
+
+        // 통계 계산.
+        BconnNetPerfResult r{};
+        r.sent = count;
+        std::vector<double> rtts;
+        {
+            std::lock_guard<std::mutex> lk(g_probe_mu);
+            rtts = g_probe_rtts;
+        }
+        r.received = (int)rtts.size();
+        r.loss_pct = 100.0 * (count - r.received) / count;
+        if (!rtts.empty()) {
+            double sum = 0, mn = rtts[0], mx = rtts[0];
+            for (double v : rtts) { sum += v; mn = std::min(mn, v); mx = std::max(mx, v); }
+            r.avg_ms = sum / rtts.size();
+            r.min_ms = mn;
+            r.max_ms = mx;
+            double var = 0;
+            for (double v : rtts) var += (v - r.avg_ms) * (v - r.avg_ms);
+            r.stddev_ms = std::sqrt(var / rtts.size());
+        }
+
+        BCONN_INFO(CAT_NETWORK,
+            "[성능측정] 전송=%d 수신=%d 손실=%.0f%% RTT min/avg/max=%.1f/%.1f/%.1fms 지터=%.1fms",
+            r.sent, r.received, r.loss_pct, r.min_ms, r.avg_ms, r.max_ms, r.stddev_ms);
+
+        cb(&r, ctx);
+        g_probe_running.store(false, std::memory_order_release);
+    }).detach();
+
+    return true;
 }

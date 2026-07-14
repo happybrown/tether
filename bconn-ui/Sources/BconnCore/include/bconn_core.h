@@ -97,6 +97,29 @@ BconnStatus bconn_get_status(void);
 // out_size: 버퍼 크기, 반환값: 기록된 IP 개수
 int bconn_get_local_ips(char* out, int out_size);
 
+// ── 네트워크 성능(RTT) 측정 ───────────────────────────────────────────
+// 연결된 상대 Mac 으로 probe 패킷을 왕복시켜 실제 UDP 경로의 지연을 측정한다.
+// 앱이 실제 쓰는 소켓/경로를 그대로 사용하므로 마우스 지연을 가장 정확히 반영한다.
+
+typedef struct {
+    int    sent;         // 보낸 probe 수
+    int    received;     // 응답받은 수
+    double loss_pct;     // 손실률 (%)
+    double min_ms;       // 최소 RTT
+    double avg_ms;       // 평균 RTT
+    double max_ms;       // 최대 RTT
+    double stddev_ms;    // 표준편차 (지터)
+} BconnNetPerfResult;
+
+// 측정 완료 콜백. result 는 콜백 반환 후 무효화되므로 필요하면 복사할 것.
+typedef void (*BconnNetPerfCallback)(const BconnNetPerfResult* result, void* ctx);
+
+// 비동기로 count 회 probe 를 interval_ms 간격으로 보내 RTT 를 측정한다.
+// 인증 완료(연결) 상태에서만 동작하며, 미연결 시 콜백에 sent=0 결과를 전달한다.
+// 측정은 백그라운드 스레드에서 수행되고, 완료 시 cb 가 그 스레드에서 호출된다.
+// 이미 측정이 진행 중이면 무시된다(false 반환). 시작하면 true.
+bool bconn_run_netperf(int count, int interval_ms, BconnNetPerfCallback cb, void* ctx);
+
 #ifdef __cplusplus
 }
 #endif

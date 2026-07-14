@@ -143,6 +143,42 @@ class BconnManager: ObservableObject {
         bconn_set_predict_leave(enabled)
     }
 
+    // MARK: - 네트워크 성능 측정
+
+    /// 연결된 상대 Mac 으로 probe 를 왕복시켜 RTT 를 측정한다.
+    /// C 코어가 백그라운드 스레드에서 측정 후 콜백하므로, 결과를 메인 큐로 넘겨 전달한다.
+    /// 반환값: 측정을 시작했으면 true (미연결/중복 실행 시 false).
+    @discardableResult
+    func runNetPerf(count: Int, intervalMs: Int,
+                    completion: @escaping (NetPerfResult) -> Void) -> Bool {
+        // completion 을 heap 에 박스로 담아 opaque 포인터로 C 에 넘긴다.
+        // 콜백에서 회수·해제하므로 정확히 한 번만 호출된다.
+        let box = Box(completion)
+        let ctx = Unmanaged.passRetained(box).toOpaque()
+
+        let started = bconn_run_netperf(Int32(count), Int32(intervalMs), { result, ctx in
+            guard let ctx else { return }
+            let box = Unmanaged<Box<(NetPerfResult) -> Void>>.fromOpaque(ctx).takeRetainedValue()
+            let r = result?.pointee
+            let parsed = NetPerfResult(
+                sent: Int(r?.sent ?? 0),
+                received: Int(r?.received ?? 0),
+                lossPct: r?.loss_pct ?? 0,
+                minMs: r?.min_ms ?? 0,
+                avgMs: r?.avg_ms ?? 0,
+                maxMs: r?.max_ms ?? 0,
+                stddevMs: r?.stddev_ms ?? 0
+            )
+            DispatchQueue.main.async { box.value(parsed) }
+        }, ctx)
+
+        // 시작 못 했으면(미연결/중복) 박스를 회수해 누수를 막는다.
+        if !started {
+            Unmanaged<Box<(NetPerfResult) -> Void>>.fromOpaque(ctx).release()
+        }
+        return started
+    }
+
     // MARK: - Escape Shortcuts
 
     /// Cmd+Shift+Esc 감지 시 세션을 강제 중지한다.
@@ -331,3 +367,34 @@ class BconnManager: ObservableObject {
 
 // SwiftUI Color를 Foundation에서 쓰기 위한 import
 import SwiftUI
+
+// ── 네트워크 성능 측정 결과 ────────────────────────────────────────────
+
+struct NetPerfResult {
+    let sent: Int
+    let received: Int
+    let lossPct: Double
+    let minMs: Double
+    let avgMs: Double
+    let maxMs: Double
+    let stddevMs: Double
+
+    var hasData: Bool { received > 0 }
+
+    /// 평균 RTT 기준 체감 등급. 마우스 원격 조작 기준.
+    var grade: (label: String, color: Color) {
+        switch avgMs {
+        case ..<5:   return ("아주 좋음", .green)
+        case ..<15:  return ("좋음", .green)
+        case ..<30:  return ("보통", .yellow)
+        case ..<60:  return ("느림", .orange)
+        default:     return ("매우 느림", .red)
+        }
+    }
+}
+
+/// Swift 클로저를 C opaque 포인터로 넘기기 위한 heap 박스.
+final class Box<T> {
+    let value: T
+    init(_ value: T) { self.value = value }
+}

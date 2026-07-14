@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 설정 창의 탭. 로그 뷰도 여기에 통합되어 하나의 창으로 동작한다.
 enum SettingsTab: Hashable {
-    case connection, security, general, logs
+    case connection, security, network, general, logs
 }
 
 struct SettingsView: View {
@@ -28,6 +28,9 @@ struct SettingsView: View {
                 securityTab
                     .tabItem { Label("보안", systemImage: "lock") }
                     .tag(SettingsTab.security)
+                NetworkTestView()
+                    .tabItem { Label("네트워크", systemImage: "speedometer") }
+                    .tag(SettingsTab.network)
                 generalTab
                     .tabItem { Label("일반", systemImage: "slider.horizontal.3") }
                     .tag(SettingsTab.general)

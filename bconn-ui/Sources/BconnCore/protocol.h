@@ -22,6 +22,7 @@ static const uint8_t PACKET_PONG        = 5; // host → client: PING 응답
 static const uint8_t PACKET_CLIPBOARD   = 6; // 양방향: 클립보드 텍스트 동기화
 static const uint8_t PACKET_CLIENT_INFO = 7; // client → host: 화면 크기 전달
 static const uint8_t PACKET_LEAVE       = 8; // client → host: 반대편 경계 이탈 복귀 요청
+static const uint8_t PACKET_PROBE       = 9; // 양방향: 네트워크 성능(RTT) 측정 요청/응답
 
 // 클립보드 패킷 최대 페이로드 크기
 static const uint32_t CLIPBOARD_MAX_BYTES = 60 * 1024;
@@ -80,6 +81,16 @@ struct LeavePacket {
     int16_t  residual_dy;   // 경계 초과 이동량 y
 };
 
+// 네트워크 성능(RTT) 측정용. 측정 개시 측이 is_ack=0 으로 보내면 상대는 내용을
+// 그대로 두고 is_ack=1 로 되돌린다. 개시 측은 seq 로 짝을 맞춰 왕복 시간을 계산한다.
+// t_send_us 는 개시 측의 송신 시각(참고용)이며, RTT 는 개시 측이 자체 시계로 왕복을 잰다.
+struct ProbePacket {
+    uint8_t  packet_type;   // = PACKET_PROBE
+    uint8_t  is_ack;        // 0=요청, 1=응답(echo)
+    uint16_t seq;           // 요청/응답 짝 맞춤용 시퀀스
+    int64_t  t_send_us;     // 개시 측 송신 시각 (마이크로초, 참고용)
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(MousePacket)      == 9,  "MousePacket size changed");
@@ -88,6 +99,7 @@ static_assert(sizeof(HelloPacket)      == 64, "HelloPacket size changed");
 static_assert(sizeof(AuthAckPacket)    == 34, "AuthAckPacket size changed");
 static_assert(sizeof(ClientInfoPacket) == 9,  "ClientInfoPacket size changed");
 static_assert(sizeof(LeavePacket)      == 8,  "LeavePacket size changed");
+static_assert(sizeof(ProbePacket)      == 12, "ProbePacket size changed");
 
 // recv_loop 버퍼: 클립보드 청크가 가장 크므로 헤더(5B) + 페이로드로 산정
 static const size_t MAX_PACKET_SIZE = 5 + CLIPBOARD_CHUNK_SIZE;
