@@ -1,8 +1,42 @@
 import SwiftUI
 
 /// 설정 창의 탭. 로그 뷰도 여기에 통합되어 하나의 창으로 동작한다.
-enum SettingsTab: Hashable {
+/// 사이드바 항목의 아이콘·라벨도 여기서 단일 소스로 관리한다.
+enum SettingsTab: Hashable, CaseIterable, Identifiable {
     case connection, security, network, general, logs
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .connection: return "연결"
+        case .security:   return "보안"
+        case .network:    return "네트워크"
+        case .general:    return "일반"
+        case .logs:       return "로그"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .connection: return "network"
+        case .security:   return "lock"
+        case .network:    return "speedometer"
+        case .general:    return "slider.horizontal.3"
+        case .logs:       return "doc.text.magnifyingglass"
+        }
+    }
+
+    /// 사이드바 아이콘 배경 틴트 (시각적 구분).
+    var tint: Color {
+        switch self {
+        case .connection: return .blue
+        case .security:   return .green
+        case .network:    return .orange
+        case .general:    return .gray
+        case .logs:       return .purple
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -20,34 +54,21 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TabView(selection: $selectedTab) {
-                connectionTab
-                    .tabItem { Label("연결", systemImage: "network") }
-                    .tag(SettingsTab.connection)
-                securityTab
-                    .tabItem { Label("보안", systemImage: "lock") }
-                    .tag(SettingsTab.security)
-                NetworkTestView()
-                    .tabItem { Label("네트워크", systemImage: "speedometer") }
-                    .tag(SettingsTab.network)
-                generalTab
-                    .tabItem { Label("일반", systemImage: "slider.horizontal.3") }
-                    .tag(SettingsTab.general)
-                LogView()
-                    .tabItem { Label("로그", systemImage: "doc.text.magnifyingglass") }
-                    .tag(SettingsTab.logs)
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(184)
+        } detail: {
+            VStack(spacing: 0) {
+                detailContent
+                // 로그 탭은 자체 상태바를 가지므로 시작/중지 하단바를 숨긴다.
+                if selectedTab != .logs {
+                    sessionBar
+                }
             }
-            .padding(.top, 8)
-
-            // 로그 탭은 자체 상태바를 가지므로 시작/중지 하단바를 숨긴다.
-            if selectedTab != .logs {
-                sessionBar
-            }
+            .frame(minWidth: 440)
+            .navigationTitle(selectedTab.label)
         }
-        // 로그 탭에서 넓게 볼 수 있도록 최소 크기만 지정하고 리사이즈를 허용한다.
-        // 설정 탭들은 이 최소 크기 안에서 스크롤 없이 담긴다.
-        .frame(minWidth: 520, minHeight: 680)
+        .frame(minWidth: 660, minHeight: 560)
         .onAppear {
             portString = String(settings.port)
             manager.refreshLocalIPs()
@@ -58,19 +79,63 @@ struct SettingsView: View {
         }
     }
 
+    // ── 사이드바 ──────────────────────────────────────────────────
+
+    private var sidebar: some View {
+        List(selection: $selectedTab) {
+            ForEach(SettingsTab.allCases) { tab in
+                Label {
+                    Text(tab.label)
+                        .font(.system(size: 13))
+                } icon: {
+                    // 시스템 설정 스타일의 둥근 컬러 아이콘 칩.
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(tab.tint.gradient, in: RoundedRectangle(cornerRadius: 5))
+                }
+                .tag(tab)
+                .padding(.vertical, 2)
+            }
+        }
+        .listStyle(.sidebar)
+    }
+
+    // ── 선택 탭 콘텐츠 ────────────────────────────────────────────
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch selectedTab {
+        case .connection: connectionTab
+        case .security:   securityTab
+        case .network:    NetworkTestView()
+        case .general:    generalTab
+        case .logs:       LogView()
+        }
+    }
+
     // ── 하단 세션 상태바 + 시작/중지 버튼 ──────────────────────────
 
     private var sessionBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(spacing: 8) {
-                Image(systemName: manager.statusHeaderSymbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(manager.statusColor)
-                Text(manager.statusLabel)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                // 상태 pill — 아이콘+라벨을 상태색 배경에 담아 한눈에 구분.
+                HStack(spacing: 6) {
+                    Image(systemName: manager.statusHeaderSymbol)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(manager.statusLabel)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(manager.statusColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(manager.statusColor.opacity(0.12),
+                            in: Capsule())
+
                 Spacer()
+
                 if manager.isRunning {
                     Button(role: .destructive) { manager.stop() } label: {
                         Label("중지", systemImage: "stop.fill")
@@ -85,8 +150,9 @@ struct SettingsView: View {
                     .disabled(!canStart)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 20)
             .padding(.vertical, 12)
+            .background(.bar)
         }
     }
 
@@ -128,8 +194,10 @@ struct SettingsView: View {
     /// 각 탭 공통 스크롤 컨테이너. 탭이 길어져도 창 높이를 넘지 않도록 스크롤한다.
     private func tabScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         ScrollView {
-            VStack(spacing: 20) { content() }
-                .padding(24)
+            VStack(spacing: 18) { content() }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
