@@ -46,8 +46,14 @@ struct SettingsView: View {
     /// 외부(메뉴바)에서 특정 탭을 선택해 열 수 있도록 바인딩으로 받는다.
     @Binding var selectedTab: SettingsTab
 
+    // 연결 설정(IP/Port/PSK)은 편집 중 즉시 반영하지 않고 로컬 State 에 담아둔다.
+    // "적용" 을 눌러야 한 번에 저장 + (실행 중이면) 재시작 1회 → 부분 반영으로 인한
+    // 중간 상태 재연결(연결 끊김)을 방지한다.
     @State private var portString: String = ""
     @State private var portError: String?
+    @State private var hostIPString: String = ""
+    @State private var hostIPError: String?
+    @State private var pskString: String = ""
 
     init(selectedTab: Binding<SettingsTab> = .constant(.connection)) {
         _selectedTab = selectedTab
@@ -70,13 +76,28 @@ struct SettingsView: View {
         }
         .frame(minWidth: 660, minHeight: 560)
         .onAppear {
-            portString = String(settings.port)
+            syncEditFields()
             manager.refreshLocalIPs()
             manager.refreshAccessibilityPermission()
         }
         .onChange(of: settings.port) { newValue in
             if portString != String(newValue) { portString = String(newValue) }
         }
+        .onChange(of: settings.hostIP) { newValue in
+            if hostIPString != newValue { hostIPString = newValue }
+        }
+        .onChange(of: settings.psk) { newValue in
+            if pskString != newValue { pskString = newValue }
+        }
+    }
+
+    /// 편집 State 를 저장값과 동기화한다 (창 열릴 때 / 적용 후).
+    private func syncEditFields() {
+        portString = String(settings.port)
+        hostIPString = settings.hostIP
+        pskString = settings.psk
+        portError = nil
+        hostIPError = nil
     }
 
     // ── 사이드바 ──────────────────────────────────────────────────
@@ -167,6 +188,7 @@ struct SettingsView: View {
             }
             connectionSection
             networkSection
+            connectionApplyBar
         }
     }
 
@@ -175,6 +197,7 @@ struct SettingsView: View {
     private var securityTab: some View {
         tabScroll {
             securitySection
+            connectionApplyBar
         }
     }
 
@@ -311,13 +334,50 @@ struct SettingsView: View {
                     }
                 } else {
                     FormRow(label: "Host IP") {
-                        TextField("예: 192.168.0.10", text: $settings.hostIP)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                            .onSubmit { restartIfRunning() }
+                        VStack(alignment: .trailing, spacing: 4) {
+                            TextField("예: 192.168.0.10", text: $hostIPString)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 200)
+                                .onSubmit { applyConnectionSettings() }
+                            if let err = hostIPError {
+                                Text(err).font(.system(size: 10)).foregroundStyle(.red)
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // ── 연결 설정 적용 바 (IP/Port/PSK 공통) ─────────────────────────
+    // 미저장 변경이 있을 때만 나타나, 눌러야 한 번에 저장 + 재시작 1회.
+    // 연결 탭(IP·Port)과 보안 탭(PSK) 하단에 공통으로 배치한다.
+
+    @ViewBuilder
+    private var connectionApplyBar: some View {
+        if connectionDirty {
+            HStack(spacing: 8) {
+                Image(systemName: "pencil.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 12))
+                Text(manager.isRunning
+                     ? "미저장 변경 — 적용 시 재연결됩니다"
+                     : "미저장 변경")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("되돌리기") { syncEditFields() }
+                    .controlSize(.small)
+                Button("적용") { applyConnectionSettings() }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: [.command])
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.orange.opacity(0.08))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.25), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 
@@ -332,7 +392,7 @@ struct SettingsView: View {
                             TextField("24900", text: $portString)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 80)
-                                .onSubmit { commitPort() }
+                                .onSubmit { applyConnectionSettings() }
                             Text("기본값 24900")
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
@@ -371,10 +431,10 @@ struct SettingsView: View {
         FormSection(title: "보안", icon: "lock") {
             FormRow(label: "공유 암호") {
                 VStack(alignment: .trailing, spacing: 4) {
-                    SecureField("비어있으면 인증 없음", text: $settings.psk)
+                    SecureField("비어있으면 인증 없음", text: $pskString)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 200)
-                        .onSubmit { restartIfRunning() }
+                        .onSubmit { applyConnectionSettings() }
                     Text("양쪽 Mac 에 동일한 값을 입력하세요")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -453,17 +513,68 @@ struct SettingsView: View {
         manager.restart()
     }
 
-    private func commitPort() {
-        let trimmed = portString.trimmingCharacters(in: .whitespaces)
-        guard let value = Int(trimmed), (1...65535).contains(value) else {
+    /// 편집값(IP/Port/PSK)이 저장값과 달라 적용이 필요한 상태인지.
+    /// trim 후 비교해 공백만 다른 경우는 dirty 로 치지 않는다.
+    private var connectionDirty: Bool {
+        if pskString != settings.psk { return true }
+        if portString.trimmingCharacters(in: .whitespaces) != String(settings.port) { return true }
+        if settings.mode == .client,
+           hostIPString.trimmingCharacters(in: .whitespaces) != settings.hostIP { return true }
+        return false
+    }
+
+    /// IP/Port/PSK 편집값을 한 번에 검증·저장하고, 실행 중이면 재시작을 정확히 1회 수행한다.
+    /// 개별 필드가 즉시 반영되며 중간 상태로 재연결되던 문제(연결 끊김)를 막는다.
+    private func applyConnectionSettings() {
+        // 1) Port 검증
+        let portTrim = portString.trimmingCharacters(in: .whitespaces)
+        guard let portValue = Int(portTrim), (1...65535).contains(portValue) else {
             portError = "1~65535 범위의 숫자를 입력하세요"
-            portString = String(settings.port)
             return
         }
         portError = nil
-        if value != settings.port {
-            settings.port = value
-            restartIfRunning()
+
+        // 2) Host IP 검증 (client 모드). 빈 값이나 잘못된 형식은 적용을 거부한다.
+        //    빈 IP 로 저장하면 host 없이 재시작돼 연결이 끊기므로(예: IP 를 지우다
+        //    되돌리기 시 onSubmit 이 빈 값을 커밋) 여기서 막는다.
+        let ipTrim = hostIPString.trimmingCharacters(in: .whitespaces)
+        if settings.mode == .client {
+            if ipTrim.isEmpty {
+                hostIPError = "Host IP 를 입력하세요"
+                return
+            }
+            if !Self.isValidIPv4(ipTrim) {
+                hostIPError = "올바른 IPv4 주소를 입력하세요 (예: 192.168.0.10)"
+                return
+            }
         }
+        hostIPError = nil
+
+        // 3) 검증 통과 → 저장값과 다른 것만 반영. 저장은 값 변경 시 즉시 이뤄지므로
+        //    먼저 모두 저장한 뒤, 실행 중이면 재시작을 마지막에 한 번만 호출한다.
+        var changed = false
+        if portValue != settings.port { settings.port = portValue; changed = true }
+        if pskString != settings.psk { settings.psk = pskString; changed = true }
+        if settings.mode == .client, ipTrim != settings.hostIP {
+            settings.hostIP = ipTrim; changed = true
+        }
+        // 편집 필드를 정규화된 값으로 되돌린다 (예: 앞뒤 공백 제거).
+        portString = String(settings.port)
+        hostIPString = settings.hostIP
+
+        if changed { restartIfRunning() }
+    }
+
+    /// IPv4 점4분 표기 엄격 검증: 옥텟 4개, 각 0~255, 선행 0 없는 순수 숫자.
+    static func isValidIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        for p in parts {
+            guard !p.isEmpty, p.count <= 3, p.allSatisfy(\.isNumber),
+                  let n = Int(p), (0...255).contains(n) else { return false }
+            // "01", "007" 같은 선행 0 표기 거부 (한 자리 "0"은 허용).
+            if p.count > 1 && p.first == "0" { return false }
+        }
+        return true
     }
 }
