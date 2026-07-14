@@ -370,7 +370,9 @@ import SwiftUI
 
 // ── 네트워크 성능 측정 결과 ────────────────────────────────────────────
 
-struct NetPerfResult {
+struct NetPerfResult: Codable, Identifiable {
+    var id = UUID()
+    var date = Date()
     let sent: Int
     let received: Int
     let lossPct: Double

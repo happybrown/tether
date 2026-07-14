@@ -4,10 +4,10 @@ import SwiftUI
 /// 마우스/키보드가 타는 바로 그 소켓 경로를 재사용하므로 체감 지연을 정확히 반영한다.
 struct NetworkTestView: View {
     @ObservedObject private var manager = BconnManager.shared
+    @ObservedObject private var history = NetPerfHistory.shared
 
     @State private var running = false
     @State private var result: NetPerfResult?
-    @State private var progressNote = ""
 
     // 측정 파라미터 — 기본 50회 / 100ms 간격(약 5초).
     private let probeCount = 50
@@ -32,6 +32,10 @@ struct NetworkTestView: View {
 
                 if let result {
                     resultSection(result)
+                }
+
+                if history.entries.count >= 2 {
+                    chartSection
                 }
 
                 Spacer(minLength: 0)
@@ -137,6 +141,37 @@ struct NetworkTestView: View {
         }
     }
 
+    // ── 추이 차트 ─────────────────────────────────────────────────────
+
+    private var chartSection: some View {
+        FormSection(title: "최근 \(NetPerfHistory.maxEntries)회 추이", icon: "chart.xyaxis.line") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    legendItem(color: .blue, filled: true, label: "평균 RTT")
+                    legendItem(color: .blue.opacity(0.3), filled: false, label: "최소~최대")
+                    Spacer()
+                    Button("이력 지우기") { history.clear() }
+                        .font(.system(size: 11))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+                NetPerfChartView(entries: history.entries)
+            }
+            .padding(16)
+        }
+    }
+
+    private func legendItem(color: Color, filled: Bool, label: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(filled ? color : color.opacity(0.5))
+                .frame(width: 14, height: filled ? 3 : 8)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // ── 측정 실행 ─────────────────────────────────────────────────────
 
     private func startMeasure() {
@@ -145,6 +180,7 @@ struct NetworkTestView: View {
         let ok = manager.runNetPerf(count: probeCount, intervalMs: intervalMs) { r in
             self.result = r
             self.running = false
+            self.history.add(r)   // 유효한 측정만 내부에서 걸러 누적
         }
         if !ok { running = false }
     }
