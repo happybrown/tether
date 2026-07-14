@@ -64,8 +64,8 @@ static std::atomic<bool> g_ping_running{false};
 static uint16_t          g_reconnect_interval_s = 5;
 
 // host: 자체 복귀 예측 사용 여부. EventTap 콜백(다른 스레드)에서 읽으므로 atomic.
-// 기본 true(현재 동작 유지). 끄면 client LeavePacket 안전망으로만 복귀한다.
-std::atomic<bool>        g_predict_leave{true};
+// 기본 false. 끄면 client LeavePacket 안전망으로만 복귀한다(지연 있으나 오탐 없음).
+std::atomic<bool>        g_predict_leave{false};
 
 // ── 네트워크 성능(RTT) 측정 상태 ──────────────────────────────────────
 // probe 요청을 보낸 seq 별 송신 시각을 기록해두고, 응답(is_ack=1) 수신 시 왕복을 잰다.
