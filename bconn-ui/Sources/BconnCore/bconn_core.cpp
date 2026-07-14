@@ -160,7 +160,12 @@ void bconn_set_force_stop_callback(BconnForceStopCallback cb, void* ctx) {
 
 void bconn_send_clipboard(const uint8_t* data, uint32_t len) {
     if (!g_engine) return;
-    if (!g_auth_ok.load(std::memory_order_acquire)) return;
+    // 연결 확인은 모드별로 다르다. g_auth_ok 는 client 전용 상태(host 로부터 AUTH_ACK
+    // 수신 여부)라, 이것만 검사하면 host 에선 항상 false → host→client 클립보드가
+    // 전송되지 않는다. host 는 peer 등록(client 인증 성공) 여부로 판정해야 한다.
+    bool ready = g_cfg.is_host ? g_engine->is_peer_known()
+                               : g_auth_ok.load(std::memory_order_acquire);
+    if (!ready) return;
     g_engine->send_clipboard(data, len);
 }
 
