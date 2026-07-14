@@ -382,10 +382,19 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     // 커서 offscreen 유지 보정 (스크롤 제외).
     // CGAssociate(false) 로 연동을 끊어도 시스템 커서의 화면상 위치 자체는 남아 있어,
     // macOS 가 커서를 화면 안으로 되돌리면 host 커서가 물리 마우스를 따라 보이게 된다.
-    // 따라서 매 이벤트 offscreen 으로 다시 밀어야 host 화면에서 커서가 사라진 상태를 유지한다.
-    // (이 warp 를 생략하면 원격/로컬 양쪽에 커서가 보이고 클릭 dispatch 도 어긋난다.)
-    if (!is_scroll)
-        CGWarpMouseCursorPosition(offscreen_point());
+    //
+    // 예전엔 매 이벤트마다 무조건 offscreen 으로 warp 했으나, CGWarpMouseCursorPosition 은
+    // WindowServer 로 가는 동기 Mach RPC 라 active tap 콜백을 매번 블로킹해 감도/지연의
+    // 주범이었다. 실제로 커서가 화면 안으로 튕겨 돌아오는 이벤트는 드물고 대부분은 이미
+    // offscreen 상태이므로, 이벤트에 실려온 현재 좌표(loc, 추가 RPC 없음)가 데스크톱 경계
+    // 안에 들어와 있을 때만 다시 밀어낸다. 절대다수의 이동에서 warp RPC 가 제거된다.
+    if (!is_scroll) {
+        CGPoint loc = CGEventGetLocation(event);
+        bool cursor_visible = loc.x >= g_layout.left && loc.x <= g_layout.right &&
+                              loc.y >= g_layout.top  && loc.y <= g_layout.bottom;
+        if (cursor_visible)
+            CGWarpMouseCursorPosition(offscreen_point());
+    }
 
     if (is_click) {
         BCONN_DEBUG(CAT_EVENT, "[호스트] 클릭 전송: type=%u entry_guard=%d", (unsigned)type, g_remote.entry_guard);

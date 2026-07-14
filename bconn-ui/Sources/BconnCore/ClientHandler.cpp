@@ -206,11 +206,14 @@ void client_handle_move(const MousePacket& pkt) {
                      etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
                      etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
 
-    // 커서를 실제 pos 로 옮긴 뒤 이벤트를 post 한다.
-    // 이동뿐 아니라 클릭에도 warp 가 필요하다: 클릭 시점에 시스템 커서가 pos 에 있지 않으면
-    // (직전 이동 warp 반영 지연, 물리 마우스 개입 등) macOS 가 클릭을 엉뚱한 위치에 넣거나
-    // 무시해 원격 클릭이 먹통이 된다. 클릭은 down/up 이 짧게 이어지므로 각각 위치를 보장한다.
-    if (etype == kCGEventMouseMoved || is_click) {
+    // 위치 이동 방식:
+    // - 순수 이동(mouseMoved): CGEventPost 가 절대위치 pos 를 실어 커서를 옮긴다.
+    //   여기서 warp 를 생략해 이동당 Mach RPC(warp+associate)를 제거한다 — 감도/지연의
+    //   핵심 개선. post 이벤트의 location 이 곧 커서 위치가 되므로 결과 위치는 동일하다.
+    // - 클릭/드래그: warp 로 시스템 커서를 pos 에 확정한 뒤 이벤트를 넣는다. 클릭은
+    //   "현재 커서 위치"에서 히트테스트되고 드래그는 대상 추적이 필요해, 위치가 조금이라도
+    //   어긋나면 엉뚱한 곳을 클릭하거나 드래그가 끊긴다. 이 경로는 저빈도라 warp 유지가 안전.
+    if (etype != kCGEventMouseMoved) {
         CGWarpMouseCursorPosition(pos);
         CGAssociateMouseAndMouseCursorPosition(true);
     }
