@@ -11,6 +11,7 @@ static const uint32_t EVENT_CLIENT_INFO  = 9996; // (deprecated) PACKET_CLIENT_I
 static const uint32_t EVENT_KEY_DOWN     = 9001; // host→client: 키 눌림
 static const uint32_t EVENT_KEY_UP       = 9002; // host→client: 키 뗌
 static const uint32_t EVENT_FLAGS_CHANGE = 9003; // host→client: modifier 키 변경
+static const uint32_t EVENT_RESET_MODIFIERS = 9004; // host→client: 눌린 modifier 전체 해제(복귀 시)
 
 // 패킷 종류 구분자
 static const uint8_t PACKET_MOUSE       = 0;

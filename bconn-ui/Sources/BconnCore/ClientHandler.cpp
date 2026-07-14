@@ -251,7 +251,25 @@ void client_handle_move(const MousePacket& pkt) {
     }
 }
 
+// 원격 복귀 시 client 에 고착됐을 수 있는 modifier 를 전부 해제한다.
+// 각 modifier 키에 keyUp 을 주입하고, flags 를 0 으로 밀어 잔여 상태를 지운다.
+static void client_reset_modifiers() {
+    // 좌/우 Command, Shift, Option, Control + CapsLock + Fn 의 keycode.
+    static const CGKeyCode kMods[] = { 55, 54, 56, 60, 58, 61, 59, 62, 57, 63 };
+    for (CGKeyCode kc : kMods) {
+        CGEventRef up = CGEventCreateKeyboardEvent(NULL, kc, false);
+        CGEventSetFlags(up, 0);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(up);
+    }
+    BCONN_INFO(CAT_EVENT, "[클라이언트] modifier 전체 해제 (복귀)");
+}
+
 void client_handle_key(const KeyPacket& pkt) {
+    if (pkt.event_type == EVENT_RESET_MODIFIERS) {
+        client_reset_modifiers();
+        return;
+    }
     bool key_down = (pkt.event_type == EVENT_KEY_DOWN);
     // EVENT_FLAGS_CHANGE는 keyDown=false로 전달해야 modifier 키 상태가 정상 반영된다.
     CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode,

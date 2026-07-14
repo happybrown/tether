@@ -445,6 +445,10 @@ bool bconn_start(const BconnConfig* config, BconnStatusCallback cb, void* ctx) {
 
         auto on_key = [](const KeyPacket& pkt) {
             if (!g_auth_ok.load(std::memory_order_acquire)) return;
+            // modifier 해제는 복귀 신호이므로 pos_init(원격 활성) 가드와 무관하게 처리한다.
+            // SHOW_CURSOR(pos_init=false)와 RESET_MODIFIERS 는 UDP 라 순서가 뒤집힐 수 있어,
+            // 이 가드를 두면 SHOW_CURSOR 가 먼저 와 pos_init=false 가 됐을 때 리셋이 무시된다.
+            if (pkt.event_type == EVENT_RESET_MODIFIERS) { client_handle_key(pkt); return; }
             if (g_client.pos_init) client_handle_key(pkt);
         };
 

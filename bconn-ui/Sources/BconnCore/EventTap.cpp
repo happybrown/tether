@@ -290,6 +290,13 @@ static void leave_remote() {
     // 3회 연속 전송으로 즉각 유실을 방어한다 (PONG active 비트 자가교정이 백업).
     for (int i = 0; i < 3; ++i) g_engine->send_mouse(pkt);
 
+    // 복귀 시 client 에 남아있을 수 있는 modifier(Ctrl/Cmd/Shift/Opt)를 전부 해제한다.
+    // 원격 중 modifier down 을 보낸 뒤 그 up 이 로컬 복귀 후 발생하면(또는 UDP 유실 시)
+    // client 에 키가 고착되므로, 복귀 때마다 명시적으로 리셋해 자동 복구시킨다.
+    KeyPacket kp{};
+    kp.event_type = EVENT_RESET_MODIFIERS;
+    for (int i = 0; i < 3; ++i) g_engine->send_key(kp);
+
     set_status(BCONN_STATUS_CONNECTED, "연결됨");
 }
 
