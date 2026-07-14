@@ -421,8 +421,13 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
         pkt.dx = static_cast<int16_t>(std::clamp(dx, -32768LL, 32767LL));
         pkt.dy = static_cast<int16_t>(std::clamp(dy, -32768LL, 32767LL));
+    } else {
+        // 클릭은 위치 이동이 없어 dx/dy 를 안 쓰므로, dx 를 클릭 카운트(clickState)
+        // 전달에 재활용한다. 이 값이 있어야 client 에서 더블/트리플 클릭이 단어·문단
+        // 선택으로 인식된다(설정 안 하면 매 클릭이 count=1 로 처리됨). dy 는 0 유지.
+        int64_t cs = CGEventGetIntegerValueField(event, kCGMouseEventClickState);
+        pkt.dx = static_cast<int16_t>(std::clamp(cs, 1LL, 32767LL));
     }
-    // is_click 시 dx/dy는 0 (zero-initialized) — 클라이언트는 현재 커서 위치에 클릭 주입
     g_engine->send_mouse(pkt);
 
     // host 자체 복귀 판정: delta 를 client 가상 위치에 누적(client 와 동일하게 clamp)하고

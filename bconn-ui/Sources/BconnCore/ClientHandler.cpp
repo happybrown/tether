@@ -190,10 +190,19 @@ void client_handle_move(const MousePacket& pkt) {
         return;
     }
 
-    g_client.cur_x = std::clamp(g_client.cur_x + pkt.dx,
-                                 g_client.screen.left, g_client.screen.right  - 1.0);
-    g_client.cur_y = std::clamp(g_client.cur_y + pkt.dy,
-                                 g_client.screen.top,  g_client.screen.bottom - 1.0);
+    bool is_click = (etype == kCGEventLeftMouseDown  || etype == kCGEventLeftMouseUp  ||
+                     etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
+                     etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
+
+    // 클릭은 위치 이동이 없다. 게다가 host 가 클릭의 dx 필드를 클릭 카운트(clickState)
+    // 전달에 재활용하므로, 여기서 dx 를 커서에 누적하면 클릭 시 커서가 밀린다.
+    // 따라서 이동/드래그일 때만 delta 를 누적한다.
+    if (!is_click) {
+        g_client.cur_x = std::clamp(g_client.cur_x + pkt.dx,
+                                     g_client.screen.left, g_client.screen.right  - 1.0);
+        g_client.cur_y = std::clamp(g_client.cur_y + pkt.dy,
+                                     g_client.screen.top,  g_client.screen.bottom - 1.0);
+    }
 
     // 진입 반대편 경계로 이탈하려 하면 host로 복귀 요청 (예측적 — delta 방향으로 판정).
     // 복귀 판정은 실제 커서 위치를 아는 클라이언트가 맡는다 (host delta 누적은 부정확).
@@ -201,10 +210,6 @@ void client_handle_move(const MousePacket& pkt) {
         return;
 
     CGPoint pos = CGPointMake(g_client.cur_x, g_client.cur_y);
-
-    bool is_click = (etype == kCGEventLeftMouseDown  || etype == kCGEventLeftMouseUp  ||
-                     etype == kCGEventRightMouseDown || etype == kCGEventRightMouseUp ||
-                     etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp);
 
     // 위치 이동 방식:
     // - 순수 이동(mouseMoved): CGEventPost 가 절대위치 pos 를 실어 커서를 옮긴다.
@@ -227,13 +232,22 @@ void client_handle_move(const MousePacket& pkt) {
         btn = kCGMouseButtonCenter;
 
     CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
-    CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, pkt.dx);
-    CGEventSetIntegerValueField(ev, kCGMouseEventDeltaY, pkt.dy);
+    if (is_click) {
+        // host 가 dx 에 실어 보낸 클릭 카운트(1=단일,2=더블,3=트리플)를 그대로 주입한다.
+        // 이 값이 있어야 더블클릭=단어선택, 트리플클릭=문단선택이 동작한다.
+        int64_t clickState = std::max<int16_t>(1, pkt.dx);
+        CGEventSetIntegerValueField(ev, kCGMouseEventClickState, clickState);
+    } else {
+        // 이동/드래그: 상대 이동량(delta)을 실어 delta 기반 앱(FPS 등)도 반응하게 한다.
+        CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, pkt.dx);
+        CGEventSetIntegerValueField(ev, kCGMouseEventDeltaY, pkt.dy);
+    }
     CGEventPost(kCGHIDEventTap, ev);
     CFRelease(ev);
 
     if (is_click) {
-        BCONN_DEBUG(CAT_EVENT, "[클라이언트] 클릭 주입: type=%u pos=(%.0f,%.0f)", (unsigned)etype, pos.x, pos.y);
+        BCONN_DEBUG(CAT_EVENT, "[클라이언트] 클릭 주입: type=%u pos=(%.0f,%.0f) clicks=%d",
+                    (unsigned)etype, pos.x, pos.y, (int)pkt.dx);
     }
 }
 
