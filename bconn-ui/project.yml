@@ -53,13 +53,14 @@ targets:
         PRODUCT_NAME: Bconn
         # 버전 단일 소스. build.sh 가 빌드 시마다 patch 자리를 자동 증가시킨다.
         # 다음 빌드가 0.8.1 이 되도록 0.8.0 에서 시작한다.
-        MARKETING_VERSION: "0.9.28"
-        CURRENT_PROJECT_VERSION: "72"
+        MARKETING_VERSION: "0.9.32"
+        CURRENT_PROJECT_VERSION: "76"
         SWIFT_OBJC_INTEROP_MODE: objcxx
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include
         SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
         OTHER_LDFLAGS:
           - -framework ServiceManagement
+          - -framework IOKit
         INFOPLIST_FILE: Sources/BconnApp/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
@@ -98,6 +99,7 @@ targets:
         OTHER_LDFLAGS:
           - -framework ApplicationServices
           - -framework Cocoa
+          - -framework IOKit
 
   BconnAppTests:
     type: bundle.unit-test
@@ -113,3 +115,5 @@ targets:
         HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/BconnCore/include
         SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
         SWIFT_OBJC_INTEROP_MODE: objcxx
+        OTHER_LDFLAGS:
+          - -framework IOKit

@@ -4,7 +4,9 @@
 #include "BconnLog.h"
 #include "CursorUtil.h"
 #include <ApplicationServices/ApplicationServices.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 // ── bconn_core.cpp 에서 가져오는 전역 ────────────────────────────────
@@ -180,7 +182,30 @@ static bool client_check_leave(int16_t dx, int16_t dy) {
     return true;
 }
 
+// 원격 입력이 올 때, 디스플레이가 꺼져 있으면 깨운다.
+// 화면만 꺼진(디스플레이 슬립) 상태에서는 CGEventPost 합성 이벤트가 물리 입력과 달리
+// 시스템을 깨우지 못하므로 IOPMAssertionDeclareUserActivity 로 사용자 활동을 선언한다.
+//
+// 성능: 정상 사용(화면 켜짐) 중에는 CGDisplayIsAsleep 검사에서 바로 빠져나가므로
+// 매 이동 이벤트당 비용은 이 저렴한 검사 하나뿐이다. 실제 wake 호출은 화면이
+// 꺼져 있을 때만, 그마저도 3초 throttle 로 최소화한다.
+static void client_wake_display() {
+    if (!CGDisplayIsAsleep(CGMainDisplayID())) return;   // 화면 켜져 있으면 아무것도 안 함
+
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last{};
+    auto now = clock::now();
+    if (now - last < std::chrono::seconds(3)) return;    // 꺼진 상태에서만, 3초 throttle
+    last = now;
+
+    IOPMAssertionID id = 0;
+    IOPMAssertionDeclareUserActivity(
+        CFSTR("bconn remote input"), kIOPMUserActiveLocal, &id);
+    // 선언 후 반환된 assertion 은 시스템이 관리하며, 재호출 시 갱신되므로 별도 release 불필요.
+}
+
 void client_handle_move(const MousePacket& pkt) {
+    client_wake_display();
     CGEventType etype = (CGEventType)pkt.event_type;
 
     if (etype == kCGEventScrollWheel) {
@@ -270,6 +295,7 @@ void client_handle_key(const KeyPacket& pkt) {
         client_reset_modifiers();
         return;
     }
+    client_wake_display();
     bool key_down = (pkt.event_type == EVENT_KEY_DOWN);
     // EVENT_FLAGS_CHANGE는 keyDown=false로 전달해야 modifier 키 상태가 정상 반영된다.
     CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode,
