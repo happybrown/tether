@@ -27,8 +27,10 @@ static const uint8_t PACKET_PROBE       = 9; // 양방향: 네트워크 성능(R
 
 // 클립보드 패킷 최대 페이로드 크기
 static const uint32_t CLIPBOARD_MAX_BYTES = 60 * 1024;
-// 단일 전송 청크 크기 (MTU 1500 - IP 20 - UDP 8 - 패킷 헤더 9 = 1463, 안전 마진 적용)
+// 단일 전송 청크의 페이로드 크기 (MTU 1500 - IP 20 - UDP 8 - 청크 헤더 13 = 1459, 안전 마진 적용)
 static const uint32_t CLIPBOARD_CHUNK_SIZE = 1400;
+// 클립보드 청크 헤더 크기: type(1) + msg_id(2) + chunk_index(2) + total_chunks(2) + total_len(4) + payload_len(2)
+static const uint32_t CLIPBOARD_HEADER_SIZE = 13;
 
 #pragma pack(push, 1)
 
@@ -102,8 +104,8 @@ static_assert(sizeof(ClientInfoPacket) == 9,  "ClientInfoPacket size changed");
 static_assert(sizeof(LeavePacket)      == 8,  "LeavePacket size changed");
 static_assert(sizeof(ProbePacket)      == 12, "ProbePacket size changed");
 
-// recv_loop 버퍼: 클립보드 청크가 가장 크므로 헤더(5B) + 페이로드로 산정
-static const size_t MAX_PACKET_SIZE = 5 + CLIPBOARD_CHUNK_SIZE;
+// recv_loop 버퍼: 클립보드 청크가 가장 크므로 청크 헤더 + 페이로드로 산정
+static const size_t MAX_PACKET_SIZE = CLIPBOARD_HEADER_SIZE + CLIPBOARD_CHUNK_SIZE;
 
 // HMAC-SHA1(psk, hostname[32] || timestamp_s LE) → 20 bytes
 // bconn_core.cpp 와 테스트 코드가 공유하는 단일 구현

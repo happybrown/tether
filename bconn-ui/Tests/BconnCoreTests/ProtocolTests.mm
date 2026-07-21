@@ -18,8 +18,8 @@
     XCTAssertEqual(sizeof(HelloPacket),     64u);
     XCTAssertEqual(sizeof(AuthAckPacket),   34u);
     XCTAssertEqual(sizeof(ClientInfoPacket), 9u);
-    // MAX_PACKET_SIZE = 클립보드 헤더(5B) + 청크 페이로드(CLIPBOARD_CHUNK_SIZE)
-    XCTAssertEqual(MAX_PACKET_SIZE, (size_t)(5 + CLIPBOARD_CHUNK_SIZE));
+    // MAX_PACKET_SIZE = 클립보드 청크 헤더 + 청크 페이로드(CLIPBOARD_CHUNK_SIZE)
+    XCTAssertEqual(MAX_PACKET_SIZE, (size_t)(CLIPBOARD_HEADER_SIZE + CLIPBOARD_CHUNK_SIZE));
 }
 
 - (void)test_helloPacket_fieldLayout {

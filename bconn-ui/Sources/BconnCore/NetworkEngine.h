@@ -6,6 +6,7 @@
 #include <functional>
 #include <mutex>
 #include <vector>
+#include <algorithm>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -188,18 +189,30 @@ public:
     }
 
     // 클립보드 텍스트 전송 (양방향)
-    // UDP fragmentation을 피하기 위해 CLIPBOARD_CHUNK_SIZE(MTU 안전)로 제한.
-    // 초과 시 잘라서 전송한다 (수신 측에서 완전한 텍스트로 사용).
-    // 형식: [PACKET_CLIPBOARD(1) | length(4)] + data
+    // MTU 초과 텍스트를 CLIPBOARD_CHUNK_SIZE 단위로 쪼개 여러 청크로 전송한다.
+    // 각 청크 헤더로 수신 측이 순서·유실을 감지해 재조립한다.
+    // 형식: [PACKET_CLIPBOARD(1) | msg_id(2) | chunk_index(2) | total_chunks(2)
+    //        | total_len(4) | payload_len(2)] + payload
     void send_clipboard(const uint8_t* data, uint32_t len) {
         if (len == 0) return;
-        // MTU 안전 크기로 제한 — 초과분은 잘림 (UDP에서 재조립은 비현실적)
-        uint32_t send_len = std::min(len, CLIPBOARD_CHUNK_SIZE);
-        std::vector<uint8_t> buf(5 + send_len);
-        buf[0] = PACKET_CLIPBOARD;
-        memcpy(&buf[1], &send_len, 4);
-        memcpy(&buf[5], data, send_len);
-        send_raw(buf.data(), buf.size());
+        // 최대 크기 초과분은 잘라 전송 (수신 측 상한과 일치)
+        uint32_t total_len = std::min(len, CLIPBOARD_MAX_BYTES);
+        uint16_t total_chunks = (uint16_t)((total_len + CLIPBOARD_CHUNK_SIZE - 1) / CLIPBOARD_CHUNK_SIZE);
+        uint16_t msg_id = next_clip_msg_id_++;
+
+        std::vector<uint8_t> buf(CLIPBOARD_HEADER_SIZE + CLIPBOARD_CHUNK_SIZE);
+        for (uint16_t idx = 0; idx < total_chunks; ++idx) {
+            uint32_t offset = (uint32_t)idx * CLIPBOARD_CHUNK_SIZE;
+            uint16_t payload_len = (uint16_t)std::min(CLIPBOARD_CHUNK_SIZE, total_len - offset);
+            buf[0] = PACKET_CLIPBOARD;
+            memcpy(&buf[1], &msg_id, 2);
+            memcpy(&buf[3], &idx, 2);
+            memcpy(&buf[5], &total_chunks, 2);
+            memcpy(&buf[7], &total_len, 4);
+            memcpy(&buf[11], &payload_len, 2);
+            memcpy(&buf[CLIPBOARD_HEADER_SIZE], data + offset, payload_len);
+            send_raw(buf.data(), CLIPBOARD_HEADER_SIZE + payload_len);
+        }
     }
 
     // client → host: 화면 크기 전송 (단일 패킷)
@@ -255,6 +268,67 @@ private:
     ClipboardRecvCallback  on_clipboard;
     ClientInfoRecvCallback on_client_info;
     DisconnectCallback     on_disconnect;
+
+    // ── 클립보드 청크 송신/재조립 상태 ─────────────────────────────
+    uint16_t next_clip_msg_id_ = 0;
+
+    // 진행 중인 재조립 버퍼. 청크가 순서 없이 도착할 수 있으므로
+    // 인덱스별 수신 여부를 함께 추적해 유실을 감지한다.
+    struct ClipReassembly {
+        uint16_t msg_id       = 0;
+        uint16_t total_chunks = 0;
+        uint32_t total_len    = 0;
+        uint16_t received     = 0;      // 수신한 (중복 제외) 청크 수
+        std::vector<uint8_t> data;      // total_len 크기로 미리 할당
+        std::vector<bool>    got;       // 청크별 수신 여부
+    };
+    ClipReassembly clip_reasm_;
+
+    // 클립보드 청크 하나를 처리한다. 마지막 조각까지 모여 검증을 통과하면 콜백 호출.
+    void handle_clipboard_chunk(const uint8_t* buf, ssize_t n) {
+        if (n < (ssize_t)CLIPBOARD_HEADER_SIZE) return;
+        uint16_t msg_id, chunk_index, total_chunks, payload_len;
+        uint32_t total_len;
+        memcpy(&msg_id,       buf + 1,  2);
+        memcpy(&chunk_index,  buf + 3,  2);
+        memcpy(&total_chunks, buf + 5,  2);
+        memcpy(&total_len,    buf + 7,  4);
+        memcpy(&payload_len,  buf + 11, 2);
+
+        // 헤더 유효성 검증 (손상/악의적 패킷 방어)
+        if (total_chunks == 0 || total_len == 0 || total_len > CLIPBOARD_MAX_BYTES) return;
+        if (chunk_index >= total_chunks) return;
+        if (payload_len == 0 || payload_len > CLIPBOARD_CHUNK_SIZE) return;
+        if (n != (ssize_t)(CLIPBOARD_HEADER_SIZE + payload_len)) return;
+
+        // 새 메시지 도착 → 재조립 버퍼 초기화 (이전 미완성 메시지는 폐기)
+        if (clip_reasm_.msg_id != msg_id || clip_reasm_.total_chunks != total_chunks
+            || clip_reasm_.data.empty()) {
+            clip_reasm_.msg_id       = msg_id;
+            clip_reasm_.total_chunks = total_chunks;
+            clip_reasm_.total_len    = total_len;
+            clip_reasm_.received     = 0;
+            clip_reasm_.data.assign(total_len, 0);
+            clip_reasm_.got.assign(total_chunks, false);
+        }
+
+        uint32_t offset = (uint32_t)chunk_index * CLIPBOARD_CHUNK_SIZE;
+        if (offset + payload_len > clip_reasm_.total_len) return;  // 길이 불일치 방어
+        if (clip_reasm_.got[chunk_index]) return;                  // 중복 청크 무시
+
+        memcpy(&clip_reasm_.data[offset], buf + CLIPBOARD_HEADER_SIZE, payload_len);
+        clip_reasm_.got[chunk_index] = true;
+        clip_reasm_.received++;
+
+        // 모든 청크 수신 완료 → 무결성 검증 후 반영
+        if (clip_reasm_.received == clip_reasm_.total_chunks) {
+            // 중간 유실이 없었는지 총량으로 재확인 (중복/공백 방어의 최종 관문)
+            if (clip_reasm_.data.size() == clip_reasm_.total_len && on_clipboard) {
+                on_clipboard(clip_reasm_.data.data(), clip_reasm_.total_len);
+            }
+            clip_reasm_ = ClipReassembly{};  // 완료/폐기 후 상태 리셋
+        }
+    }
 
     void send_raw(const void* data, size_t len) {
         if (!peer_known.load(std::memory_order_acquire)) return;
@@ -327,12 +401,8 @@ private:
             // 2바이트: [PONG, host_active]. 1바이트: 구버전 호환(active 미상 → 1로 간주).
             uint8_t host_active = (n == 2) ? buf[1] : 1;
             on_pong(host_active);
-        } else if (type == PACKET_CLIPBOARD && n >= 5 && on_clipboard) {
-            uint32_t len = 0;
-            memcpy(&len, buf + 1, 4);
-            if (len > 0 && len <= CLIPBOARD_CHUNK_SIZE && n == (ssize_t)(5 + len)) {
-                on_clipboard(buf + 5, len);
-            }
+        } else if (type == PACKET_CLIPBOARD && n >= (ssize_t)CLIPBOARD_HEADER_SIZE && on_clipboard) {
+            handle_clipboard_chunk(buf, n);
         } else if (type == PACKET_CLIENT_INFO && n == (ssize_t)sizeof(ClientInfoPacket) && on_client_info) {
             ClientInfoPacket p;
             std::memcpy(&p, buf, sizeof(p));

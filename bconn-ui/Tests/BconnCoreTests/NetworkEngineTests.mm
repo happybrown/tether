@@ -304,4 +304,38 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertTrue(ok, @"send_raw_any가 인증 전에도 전송 가능해야 함");
 }
 
+// 여러 청크로 분할되는 큰 클립보드가 온전히 재조립되는지 검증
+- (void)test_clipboard_largePayload_reassembled {
+    int port = next_test_port();
+
+    std::atomic<bool>    received{false};
+    std::vector<uint8_t> got;
+
+    auto on_clipboard = [&](const uint8_t* data, uint32_t len) {
+        got.assign(data, data + len);
+        received.store(true);
+    };
+
+    NetworkEngine host(nullptr, port, nullptr, nullptr, nullptr, nullptr,
+                       nullptr, nullptr, on_clipboard);
+    NetworkEngine client("127.0.0.1", port);
+    host.start();
+    client.start();
+
+    // 여러 청크(≈4.4개)로 쪼개지는 크기. 인덱스로 채워 순서·경계 오류를 잡는다.
+    const uint32_t total = CLIPBOARD_CHUNK_SIZE * 4 + 500;
+    std::vector<uint8_t> payload(total);
+    for (uint32_t i = 0; i < total; ++i) payload[i] = (uint8_t)(i * 31 + 7);
+
+    client.send_clipboard(payload.data(), total);
+
+    bool ok = wait_for(received, 2000);
+    host.stop();
+    client.stop();
+
+    XCTAssertTrue(ok, @"큰 클립보드 수신 타임아웃");
+    XCTAssertEqual(got.size(), (size_t)total, @"재조립 길이 불일치");
+    XCTAssertTrue(got == payload, @"재조립 내용 불일치");
+}
+
 @end
