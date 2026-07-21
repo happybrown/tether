@@ -1,0 +1,31 @@
+# Swift 린트 설정 — 실제 버그·복잡도 위험 위주로 켠다.
+included:
+  - Sources/TetherApp
+  - Tests/TetherAppTests
+
+# 이 코드베이스 관례와 충돌하거나 노이즈성인 규칙은 끈다.
+disabled_rules:
+  - trailing_whitespace
+  - todo
+  - line_length            # 정렬·긴 로그 문자열이 많아 길이 제한은 리뷰에 맡긴다.
+  - type_body_length
+  - file_length
+  # SwiftUI 의 대표 관례인 Button(action:){label} 형태를 그대로 쓰기 위해 끈다.
+  - multiple_closures_with_trailing_closure
+
+opt_in_rules:
+  - empty_count
+  - closure_spacing
+  - redundant_nil_coalescing
+  - unneeded_parentheses_in_closure_argument
+
+identifier_name:
+  min_length: 1            # r, w, h 등 로컬 축약 허용
+  max_length: 60
+
+function_body_length:
+  warning: 80
+  error: 120
+
+cyclomatic_complexity:
+  warning: 15

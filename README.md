@@ -1,4 +1,4 @@
-# bconn
+# tether
 
 두 Mac 사이에서 마우스·키보드를 공유하는 메뉴 바 앱.
 화면 경계로 커서를 밀면 다른 Mac으로 제어가 넘어가고, 반대 방향으로 밀면 돌아온다.
@@ -10,26 +10,26 @@
 - **손쉬운 사용(Accessibility) 권한** — Host·Client **양쪽 모두** 필요
   - Host: 키보드·마우스 이벤트 캡처(Event Tap)
   - Client: 원격 클릭·키 입력 주입(Event Post)
-  - 시스템 설정 → 개인 정보 보호 및 보안 → 손쉬운 사용 → Bconn 허용
+  - 시스템 설정 → 개인 정보 보호 및 보안 → 손쉬운 사용 → Tether 허용
 
 ## 빌드
 
 ```bash
-bash build.sh          # 결과물: ./bin/Bconn.app
+bash build.sh          # 결과물: ./bin/Tether.app
 bash build.sh clean    # 빌드 산출물 정리
-bash build.sh cert     # 개발용 서명 인증서(bconn-dev) 생성 (1회)
+bash build.sh cert     # 개발용 서명 인증서(tether-dev) 생성 (1회)
 ```
 
-빌드마다 버전 patch 자리(`x.y.Z`)가 자동 증가한다. 버전은 `bconn-ui/project.yml`의
+빌드마다 버전 patch 자리(`x.y.Z`)가 자동 증가한다. 버전은 `project.yml`의
 `MARKETING_VERSION`이 단일 소스이며, 앱의 메뉴 바 헤더와 설정 창에 표시된다.
 
-> `bconn-dev` 인증서로 서명하면 재빌드해도 손쉬운 사용 권한이 유지된다.
+> `tether-dev` 인증서로 서명하면 재빌드해도 손쉬운 사용 권한이 유지된다.
 > 인증서가 없으면 adhoc으로 서명되어 재빌드마다 권한을 다시 허용해야 한다.
 
 ## 실행
 
 ```bash
-open bin/Bconn.app
+open bin/Tether.app
 ```
 
 메뉴 바에 아이콘이 생기며 백그라운드로 동작한다(Dock 아이콘 없음).
@@ -82,15 +82,14 @@ bash deploy.sh --no-restart # 빌드·동기화만, 재실행 생략
 ## 프로젝트 구조
 
 ```
-bconn/
+tether/
 ├── build.sh                 빌드 (버전 자동 증가, 서명)
 ├── deploy.sh                두 대 동시 빌드·배포
 ├── test.sh                  테스트
-└── bconn-ui/
-    ├── project.yml          xcodegen 설정 (버전 단일 소스)
-    └── Sources/
-        ├── BconnCore/       C++ 코어 (이벤트 캡처·주입, UDP 통신, 인증)
-        └── BconnApp/        Swift UI (메뉴 바, 설정 화면)
+├── project.yml              xcodegen 설정 (버전 단일 소스)
+└── Sources/
+    ├── TetherCore/           C++ 코어 (이벤트 캡처·주입, UDP 통신, 인증)
+    └── TetherApp/            Swift UI (메뉴 바, 설정 화면)
 ```
 
 자세한 아키텍처는 [CLAUDE.md](CLAUDE.md) 참고.

@@ -1,4 +1,0 @@
-module BconnCore {
-    header "bconn_core.h"
-    export *
-}

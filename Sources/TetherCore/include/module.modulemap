@@ -1,0 +1,4 @@
+module TetherCore {
+    header "tether_core.h"
+    export *
+}

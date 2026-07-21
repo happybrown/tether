@@ -4,21 +4,21 @@
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:bconn}/bconn-ui",
-            "name": "Debug BconnApp (bconn-ui)",
-            "target": "BconnApp",
+            "cwd": "${workspaceFolder:bconn}",
+            "name": "Debug TetherApp",
+            "target": "TetherApp",
             "configuration": "debug",
-            "preLaunchTask": "swift: Build Debug BconnApp (bconn-ui)"
+            "preLaunchTask": "swift: Build Debug TetherApp"
         },
         {
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:bconn}/bconn-ui",
-            "name": "Release BconnApp (bconn-ui)",
-            "target": "BconnApp",
+            "cwd": "${workspaceFolder:bconn}",
+            "name": "Release TetherApp",
+            "target": "TetherApp",
             "configuration": "release",
-            "preLaunchTask": "swift: Build Release BconnApp (bconn-ui)"
+            "preLaunchTask": "swift: Build Release TetherApp"
         }
     ]
 }

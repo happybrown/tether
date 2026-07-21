@@ -1,0 +1,119 @@
+name: TetherApp
+options:
+  bundleIdPrefix: com.tether
+  deploymentTarget:
+    macOS: "13.0"
+  defaultConfig: Release
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+targets:
+  TetherCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/TetherCore
+        excludes:
+          - include
+    settings:
+      base:
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/TetherCore/include $(SRCROOT)/Sources/TetherCore
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        DEFINES_MODULE: YES
+        OTHER_LDFLAGS:
+          - -framework ApplicationServices
+          - -framework Cocoa
+          - -lpthread
+      configs:
+        # Debug: 최적화 끄고(-O0) DEBUG 매크로 정의 → TETHER_DEBUG 상세 로그 활성화.
+        debug:
+          GCC_OPTIMIZATION_LEVEL: "0"
+          GCC_PREPROCESSOR_DEFINITIONS: DEBUG=1 $(inherited)
+          ONLY_ACTIVE_ARCH: YES
+        # Release: -O3 성능 최적화, DEBUG 로그는 컴파일 단계에서 제거된다.
+        release:
+          GCC_OPTIMIZATION_LEVEL: "3"
+          GCC_PREPROCESSOR_DEFINITIONS: NDEBUG=1 $(inherited)
+
+  TetherApp:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/TetherApp
+    dependencies:
+      - target: TetherCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tether.app
+        PRODUCT_NAME: Tether
+        # 버전 단일 소스. build.sh 가 빌드 시마다 patch 자리를 자동 증가시킨다.
+        # 다음 빌드가 0.8.1 이 되도록 0.8.0 에서 시작한다.
+        MARKETING_VERSION: "0.9.44"
+        CURRENT_PROJECT_VERSION: "88"
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/TetherCore/include
+        SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
+        OTHER_LDFLAGS:
+          - -framework ServiceManagement
+          - -framework IOKit
+        INFOPLIST_FILE: Sources/TetherApp/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        # 메뉴바 전용 앱 — Dock 아이콘 없음
+        LSUIElement: YES
+      configs:
+        # Debug: Swift 최적화 끄고(-Onone) DEBUG 조건 활성화 → #if DEBUG 코드 포함.
+        debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG $(inherited)
+          GCC_PREPROCESSOR_DEFINITIONS: DEBUG=1 $(inherited)
+          ONLY_ACTIVE_ARCH: YES
+        # Release: 전체 모듈 최적화로 성능 우선.
+        release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+    entitlements:
+      path: Sources/TetherApp/TetherApp.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+
+  TetherCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/TetherCoreTests
+    dependencies:
+      - target: TetherCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/TetherCore/include $(SRCROOT)/Sources/TetherCore
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        CLANG_CXX_LIBRARY: libc++
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        OTHER_LDFLAGS:
+          - -framework ApplicationServices
+          - -framework Cocoa
+          - -framework IOKit
+
+  TetherAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/TetherAppTests
+    dependencies:
+      - target: TetherCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.tether.apptests
+        HEADER_SEARCH_PATHS: $(SRCROOT)/Sources/TetherCore/include
+        SWIFT_INCLUDE_PATHS: $(BUILT_PRODUCTS_DIR)
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        OTHER_LDFLAGS:
+          - -framework IOKit

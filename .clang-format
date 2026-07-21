@@ -1,0 +1,19 @@
+# C++ 스타일 — 기존 코드 관례에 맞춤 (4-space indent, 100 컬럼).
+# 수동 정렬(연속 대입문 등)을 존중하도록 정렬 옵션은 보수적으로 둔다.
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AccessModifierOffset: -4
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+# 이미 정렬해둔 대입/선언을 흐트러뜨리지 않는다.
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+SortIncludes: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SpaceAfterCStyleCast: false

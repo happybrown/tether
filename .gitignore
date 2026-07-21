@@ -1,6 +1,5 @@
 bin/
-bconn-ui/.build/
-bconn-ui/build/
-bconn-ui/**/*.xcodeproj/project.pbxproj
-bconn-ui/**/*.xcodeproj/xcuserdata/
-bconn-ui/**/*.xcodeproj/project.xcworkspace/xcuserdata/
+.build/
+build/
+# xcodeproj 전체는 xcodegen 생성물 (build.sh clean 이 지우고 매 빌드 재생성)
+*.xcodeproj/
