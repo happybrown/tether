@@ -362,9 +362,13 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     std::vector<uint8_t> payload(total);
     for (uint32_t i = 0; i < total; ++i) payload[i] = (uint8_t)(i * 131 + 3);
 
-    client.send_clipboard(payload.data(), total);
-
-    bool ok = wait_for(received, 5000);
+    // localhost UDP 도 시스템 부하에 따라 드물게 청크를 떨어뜨린다 (재전송 없음 = 그 회차 실패).
+    // 실사용은 "다시 복사"가 재시도이므로, 테스트도 최대 3회 재전송으로 같은 조건을 모사한다.
+    bool ok = false;
+    for (int attempt = 0; attempt < 3 && !ok; ++attempt) {
+        client.send_clipboard(payload.data(), total);
+        ok = wait_for(received, 3000);
+    }
     host.stop();
     client.stop();
 

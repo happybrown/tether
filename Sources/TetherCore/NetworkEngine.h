@@ -219,9 +219,10 @@ public:
             memcpy(&buf[CLIPBOARD_HEADER_SIZE], data + offset, payload_len);
             send_raw(buf.data(), CLIPBOARD_HEADER_SIZE + payload_len);
             // 큰 이미지를 한 번에 쏟아내면 수신 소켓 버퍼(256KB)가 넘쳐 청크가 유실되고
-            // 재조립 전체가 실패한다. 32청크(약 45KB)마다 1ms 쉬어 수신 측에 여유를 준다.
-            // 8MB 기준 총 지연 약 190ms — 호출부가 백그라운드 스레드라 UI 영향 없음.
-            if ((idx & 31) == 31) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // 재조립 전체가 실패한다. 16청크(약 22KB)마다 1ms 쉬어 수신 측에 여유를 준다.
+            // (수신 스레드가 시스템 부하로 잠시 밀려도 버퍼의 1/10 수준이라 안전 마진이 크다.)
+            // 8MB 기준 총 지연 약 370ms — 호출부가 백그라운드 스레드라 UI 영향 없음.
+            if ((idx & 15) == 15) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
