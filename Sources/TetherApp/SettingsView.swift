@@ -90,6 +90,7 @@ struct SettingsView: View {
         .onAppear {
             syncEditFields()
             manager.refreshLocalIPs()
+            manager.refreshDisplays()
             manager.refreshAccessibilityPermission()
         }
         .onChange(of: settings.port) { newValue in
@@ -341,33 +342,44 @@ struct SettingsView: View {
     private var layoutSection: some View {
         FormSection(title: "모니터 배치", icon: "display.2") {
             VStack(alignment: .leading, spacing: 10) {
-                // 실제 해상도 비례 사각형. 드래그로 방향(edge)과 정렬 오프셋을 함께 조절.
+                // host 의 모든 디스플레이를 실제 배치대로 그리고, 상대 Mac 을 원하는
+                // 화면의 변에 붙여 기준 화면·방향·오프셋을 한 번에 지정한다.
                 MonitorLayoutView(
                     edge: $settings.clientEdge,
                     offset: $settings.clientOffset,
-                    hostResolution: NSScreen.main?.frame.size ?? CGSize(width: 16, height: 10),
+                    triggerUUID: $settings.triggerDisplayUUID,
+                    displays: manager.displays,
                     clientResolution: manager.clientScreenSize
                 )
                 .frame(maxWidth: .infinity)
                 .onChange(of: settings.clientEdge) { manager.updateClientEdge($0) }
                 .onChange(of: settings.clientOffset) { manager.updateClientOffset($0) }
+                .onChange(of: settings.triggerDisplayUUID) { manager.updateTriggerDisplay($0) }
 
                 HStack(spacing: 8) {
-                    Text("정렬 오프셋")
+                    Text("전환 기준")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                    Text(String(format: "%+d%%", Int((settings.clientOffset * 100).rounded())))
+                    Text("\(triggerDisplayLabel) \(settings.clientEdge.label)")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(String(format: "오프셋 %+d%%", Int((settings.clientOffset * 100).rounded())))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("가운데 정렬") { settings.clientOffset = 0 }
-                        .buttonStyle(.link)
-                        .font(.system(size: 10))
-                        .disabled(settings.clientOffset == 0)
+                    Button("초기화") {
+                        settings.clientOffset = 0
+                        settings.triggerDisplayUUID = ""
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 10))
+                    .disabled(settings.clientOffset == 0 && settings.triggerDisplayUUID.isEmpty)
                 }
-                Text("상대 Mac 사각형을 끌어 배치하세요. 전환 위치가 위아래(또는 좌우)로 어긋나면 경계 방향으로 끌어 보정합니다.")
+                Text(manager.displays.count > 1
+                     ? "상대 Mac 사각형을 원하는 화면의 변에 끌어다 붙이세요. 그 화면의 그 방향에서만 전환됩니다."
+                     : "상대 Mac 사각형을 끌어 배치하세요. 위아래(또는 좌우)로 어긋나면 경계 방향으로 끌어 보정합니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -397,6 +409,13 @@ struct SettingsView: View {
     // ── 연결 설정 적용 바 (IP/Port/PSK 공통) ─────────────────────────
     // 미저장 변경이 있을 때만 나타나, 눌러야 한 번에 저장 + 재시작 1회.
     // 연결 탭(IP·Port)과 보안 탭(PSK) 하단에 공통으로 배치한다.
+
+    /// 현재 전환 기준 화면의 표시 이름. 지정 없으면 자동 모드임을 알린다.
+    private var triggerDisplayLabel: String {
+        if settings.triggerDisplayUUID.isEmpty { return "전체 화면 바깥쪽" }
+        return manager.displays.first { $0.uuid == settings.triggerDisplayUUID }?.label
+            ?? "연결 안 된 화면"
+    }
 
     @ViewBuilder
     private var connectionApplyBar: some View {

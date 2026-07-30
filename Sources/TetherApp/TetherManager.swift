@@ -16,6 +16,8 @@ class TetherManager: ObservableObject {
     @Published var hasAccessibilityPermission: Bool = false
     // 연결된 client 의 화면 해상도 (host 모드, 미수신이면 nil). 배치 UI 시각화용.
     @Published var clientScreenSize: CGSize?
+    // 로컬 디스플레이 목록 (배치 UI 에서 host 화면들을 실제 배치대로 그리는 데 쓴다).
+    @Published var displays: [DisplayInfo] = []
 
     private var permissionTimer: Timer?
     private var clipboardTimer: Timer?
@@ -30,6 +32,7 @@ class TetherManager: ObservableObject {
 
     private init() {
         refreshLocalIPs()
+        refreshDisplays()
         refreshAccessibilityPermission()
         startPermissionPolling()
         registerClipboardCallback()
@@ -44,8 +47,9 @@ class TetherManager: ObservableObject {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             tether_displays_changed()
+            Task { @MainActor in self?.refreshDisplays() }
         }
     }
 
@@ -129,6 +133,13 @@ class TetherManager: ObservableObject {
         config.predict_leave = settings.predictLeave
         config.client_offset = settings.clientOffset
 
+        withUnsafeMutableBytes(of: &config.trigger_display_uuid) { ptr in
+            settings.triggerDisplayUUID.withCString { src in
+                let dest = ptr.baseAddress!.assumingMemoryBound(to: CChar.self)
+                strlcpy(dest, src, 40)
+            }
+        }
+
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         tether_start(&config, { status, msg, ctx in
             guard let ctx else { return }
@@ -171,6 +182,27 @@ class TetherManager: ObservableObject {
     /// client 화면 정렬 오프셋을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
     func updateClientOffset(_ offset: Double) {
         tether_set_client_offset(offset)
+    }
+
+    /// 전환 기준 화면을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용, 빈 문자열=자동).
+    func updateTriggerDisplay(_ uuid: String) {
+        uuid.withCString { tether_set_trigger_display($0) }
+    }
+
+    /// 로컬 디스플레이 목록을 C 코어에서 읽어 갱신한다.
+    func refreshDisplays() {
+        var buf = [TetherDisplayInfo](repeating: TetherDisplayInfo(), count: 16)
+        let n = Int(tether_get_displays(&buf, Int32(buf.count)))
+        displays = buf.prefix(n).map { d in
+            DisplayInfo(
+                uuid: withUnsafeBytes(of: d.uuid) { ptr in
+                    String(cString: ptr.baseAddress!.assumingMemoryBound(to: CChar.self))
+                },
+                frame: CGRect(x: d.x, y: d.y, width: d.width, height: d.height),
+                isMain: d.is_main,
+                isBuiltin: d.is_builtin
+            )
+        }
     }
 
     // MARK: - 네트워크 성능 측정
@@ -470,4 +502,24 @@ struct NetPerfResult: Codable, Identifiable {
 final class Box<T> {
     let value: T
     init(_ value: T) { self.value = value }
+}
+
+// ── 디스플레이 정보 ────────────────────────────────────────────────────
+
+/// 로컬 디스플레이 하나. frame 은 macOS 전역 좌표(주 디스플레이 좌상단 원점, y 아래로 증가).
+struct DisplayInfo: Identifiable, Equatable {
+    let uuid: String
+    let frame: CGRect
+    let isMain: Bool
+    let isBuiltin: Bool
+
+    var id: String { uuid }
+
+    /// 사용자에게 보여줄 이름. 내장/주 화면을 구분해 어느 모니터인지 알기 쉽게 한다.
+    var label: String {
+        if isBuiltin { return "맥북 화면" }
+        return isMain ? "주 모니터" : "외부 모니터"
+    }
+
+    var resolutionText: String { "\(Int(frame.width)) × \(Int(frame.height))" }
 }

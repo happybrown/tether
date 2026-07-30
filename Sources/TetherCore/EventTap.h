@@ -50,6 +50,13 @@ void refresh_layout(TetherEdge edge);
 /// 레이아웃/커서 접근을 RunLoop 스레드로 일원화하기 위해 내부에서 dispatch 한다.
 void apply_client_edge(TetherEdge edge);
 
+/// 전환 기준 화면(디스플레이 UUID)을 실시간으로 변경한다. NULL/빈 문자열이면 자동
+/// (전체 데스크톱 최외곽 경계). apply_client_edge 와 같은 방식으로 RunLoop 에 위임한다.
+void apply_trigger_display(const char* uuid);
+
+/// 기준 화면 UUID 를 보관한다 (RunLoop 스레드 전용, refresh_layout 이 참조).
+void set_trigger_display_uuid(const char* uuid);
+
 /// 마우스 이벤트 탭(CGEventTap)을 생성하고 RunLoop에 등록한다.
 /// 이 함수는 g_run_loop_thread 내부에서 호출되어야 한다.
 /// 실패 시 TETHER_STATUS_ERROR 로 상태를 변경한다.

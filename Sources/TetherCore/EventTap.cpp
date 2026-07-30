@@ -3,6 +3,7 @@
 /// 이 파일의 함수들은 호스트(is_host=true) 모드에서만 사용된다.
 /// 클라이언트 수신 처리는 ClientHandler.cpp 에 있다.
 #include "EventTap.h"
+#include "EdgeGeometry.h"
 #include "NetworkEngine.h"
 #include "TetherLog.h"
 #include "CursorUtil.h"
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <vector>
+#include <string>
 #include <cstring>
 
 // ── tether_core.cpp 에서 가져오는 전역 ────────────────────────────────
@@ -33,14 +35,47 @@ void set_status(TetherStatus s, const char* msg);
 
 // ── 디스플레이 레이아웃 ──────────────────────────────────────────────
 
+// 경계 기하는 EdgeGeometry(순수 함수)가 계산한다. 여기서는 CoreGraphics 로 현재
+// 디스플레이 목록을 읽어 넘기고 결과를 보관하는 역할만 한다.
 struct DisplayLayout {
-    double trigger_edge;          // 커서가 클라이언트로 넘어가는 경계 좌표
-    double top, bottom, height;
-    double left, right;
-    std::vector<CGRect> edge_displays; // 경계 방향에 접한 디스플레이 목록
+    EdgeGeometry geo;
+    double height = 0.0;   // 전체 데스크톱 높이 (offscreen/복귀 계산에 쓰임)
+
+    double trigger_edge()  const { return geo.trigger_edge; }
+    bool   interior_edge() const { return geo.interior_edge; }
+    double left()   const { return geo.left; }
+    double right()  const { return geo.right; }
+    double top()    const { return geo.top; }
+    double bottom() const { return geo.bottom; }
 };
 
 static DisplayLayout g_layout;
+
+// 사용자가 지정한 전환 기준 화면의 UUID. 빈 문자열이면 자동(가장 바깥 경계).
+// RunLoop 스레드에서만 쓰이며, 변경은 apply_trigger_display 가 위임한다.
+static char g_trigger_uuid[40] = {};
+
+/// 디스플레이의 UUID 문자열을 얻는다. 실패 시 빈 문자열.
+static void display_uuid(CGDirectDisplayID id, char out[40]) {
+    out[0] = '\0';
+    CFUUIDRef uuid = CGDisplayCreateUUIDFromDisplayID(id);
+    if (!uuid) return;
+    CFStringRef s = CFUUIDCreateString(kCFAllocatorDefault, uuid);
+    if (s) {
+        CFStringGetCString(s, out, 40, kCFStringEncodingUTF8);
+        CFRelease(s);
+    }
+    CFRelease(uuid);
+}
+
+void set_trigger_display_uuid(const char* uuid) {
+    if (uuid) {
+        strncpy(g_trigger_uuid, uuid, sizeof(g_trigger_uuid) - 1);
+        g_trigger_uuid[sizeof(g_trigger_uuid) - 1] = '\0';
+    } else {
+        g_trigger_uuid[0] = '\0';
+    }
+}
 
 void refresh_layout(TetherEdge edge) {
     CGDirectDisplayID ids[16];
@@ -49,92 +84,60 @@ void refresh_layout(TetherEdge edge) {
 
     TETHER_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 레이아웃 새로고침: 디스플레이 수=%u, 경계 방향=%d", count, (int)edge);
 
-    double min_x = 1e9, max_x = -1e9, min_y = 1e9, max_y = -1e9;
+    // 디스플레이 rect 수집 + 기준 화면 인덱스 확인 (UUID 매칭)
+    std::vector<CGRect> rects;
+    rects.reserve(count);
+    int trigger_index = -1;
     for (uint32_t i = 0; i < count; ++i) {
         CGRect b = CGDisplayBounds(ids[i]);
-        min_x = std::min(min_x, b.origin.x);
-        max_x = std::max(max_x, b.origin.x + b.size.width);
-        min_y = std::min(min_y, b.origin.y);
-        max_y = std::max(max_y, b.origin.y + b.size.height);
+        rects.push_back(b);
+        if (g_trigger_uuid[0] != '\0' && trigger_index < 0) {
+            char u[40];
+            display_uuid(ids[i], u);
+            if (strcmp(u, g_trigger_uuid) == 0) trigger_index = (int)i;
+        }
         TETHER_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 %u: 위치=(%.0f, %.0f), 크기=(%.0f x %.0f)",
                     i, b.origin.x, b.origin.y, b.size.width, b.size.height);
     }
 
-    g_layout.left   = min_x;
-    g_layout.right  = max_x;
-    g_layout.top    = min_y;
-    g_layout.bottom = max_y;
-    g_layout.height = max_y - min_y;
-
-    TETHER_DEBUG(CAT_CURSOR, "[호스트] 전체 화면 영역: (%.0f, %.0f) ~ (%.0f, %.0f), 높이=%.0f",
-                g_layout.left, g_layout.top, g_layout.right, g_layout.bottom, g_layout.height);
-
-    // 경계 방향에 따라 trigger_edge 및 edge_displays 설정
-    g_layout.edge_displays.clear();
-    for (uint32_t i = 0; i < count; ++i) {
-        CGRect b = CGDisplayBounds(ids[i]);
-        bool on_edge = false;
-        switch (edge) {
-        case TETHER_EDGE_RIGHT:
-            g_layout.trigger_edge = max_x;
-            on_edge = (b.origin.x + b.size.width >= max_x - 1.0);
-            break;
-        case TETHER_EDGE_LEFT:
-            g_layout.trigger_edge = min_x;
-            on_edge = (b.origin.x <= min_x + 1.0);
-            break;
-        case TETHER_EDGE_TOP:
-            g_layout.trigger_edge = min_y;
-            on_edge = (b.origin.y <= min_y + 1.0);
-            break;
-        case TETHER_EDGE_BOTTOM:
-            g_layout.trigger_edge = max_y;
-            on_edge = (b.origin.y + b.size.height >= max_y - 1.0);
-            break;
-        }
-        if (on_edge) {
-            g_layout.edge_displays.push_back(b);
-            TETHER_DEBUG(CAT_CURSOR, "[호스트] 에지 디스플레이 추가: %u", i);
-        }
+    if (g_trigger_uuid[0] != '\0' && trigger_index < 0) {
+        TETHER_INFO(CAT_CURSOR,
+            "[호스트] 기준 화면(uuid=%s)을 찾지 못함 — 자동(최외곽 경계)으로 폴백", g_trigger_uuid);
     }
 
-    TETHER_INFO(CAT_CURSOR, "[호스트] 레이아웃 새로고침 완료: 트리거 에지=%.0f, 에지 디스플레이 수=%zu",
-               g_layout.trigger_edge, g_layout.edge_displays.size());
+    g_layout.geo = compute_edge_geometry(rects.data(), rects.size(), edge, trigger_index);
+    g_layout.height = g_layout.bottom() - g_layout.top();
+
+    // 인접 구간(neighbor_lo~hi)은 커서가 통과하는 범위다. 전환이 안 될 때 이 로그로
+    // "근접 판정 구간인지 통과 판정 구간인지"를 바로 알 수 있다.
+    if (g_layout.interior_edge()) {
+        TETHER_INFO(CAT_CURSOR,
+            "[호스트] 레이아웃 갱신: 트리거 에지=%.0f, 인접 구간=%.0f~%.0f (이 구간은 통과 판정), "
+            "에지 화면 수=%zu, 전체 영역=(%.0f, %.0f ~ %.0f, %.0f)",
+            g_layout.trigger_edge(), g_layout.geo.neighbor_lo, g_layout.geo.neighbor_hi,
+            g_layout.geo.edge_displays.size(),
+            g_layout.left(), g_layout.top(), g_layout.right(), g_layout.bottom());
+    } else {
+        TETHER_INFO(CAT_CURSOR,
+            "[호스트] 레이아웃 갱신: 트리거 에지=%.0f, 인접 화면 없음 (근접 판정), "
+            "에지 화면 수=%zu, 전체 영역=(%.0f, %.0f ~ %.0f, %.0f)",
+            g_layout.trigger_edge(), g_layout.geo.edge_displays.size(),
+            g_layout.left(), g_layout.top(), g_layout.right(), g_layout.bottom());
+    }
 }
 
-/// 현재 커서 위치가 경계(trigger edge) 3px 이내이고 경계 디스플레이 범위 안인지 검사한다.
-static bool is_at_trigger_edge(CGPoint loc) {
-    const double threshold = 3.0;
-    bool hit = false;
-    switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  hit = loc.x >= g_layout.trigger_edge - threshold; break;
-    case TETHER_EDGE_LEFT:   hit = loc.x <= g_layout.trigger_edge + threshold; break;
-    case TETHER_EDGE_TOP:    hit = loc.y <= g_layout.trigger_edge + threshold; break;
-    case TETHER_EDGE_BOTTOM: hit = loc.y >= g_layout.trigger_edge - threshold; break;
-    }
-    if (!hit) return false;
-
-    for (const CGRect& b : g_layout.edge_displays) {
-        bool in_range = false;
-        switch (g_cfg.client_edge) {
-        case TETHER_EDGE_RIGHT:
-        case TETHER_EDGE_LEFT:
-            in_range = (loc.y >= b.origin.y && loc.y <= b.origin.y + b.size.height);
-            break;
-        case TETHER_EDGE_TOP:
-        case TETHER_EDGE_BOTTOM:
-            in_range = (loc.x >= b.origin.x && loc.x <= b.origin.x + b.size.width);
-            break;
-        }
-        if (in_range) return true;
-    }
-    return false;
+/// 현재 커서 위치가 전환 경계에 도달했는지 검사한다 (판정 로직은 EdgeGeometry 공용).
+/// out_by_crossing: 통과 판정으로 트리거됐는지 (진입점 선택에 쓴다).
+static bool is_at_trigger_edge(CGPoint loc, CGPoint prev, bool prev_valid,
+                               bool* out_by_crossing) {
+    return is_edge_reached(g_layout.geo, g_cfg.client_edge, loc, prev, prev_valid,
+                           3.0, out_by_crossing);
 }
 
-/// 진입 좌표가 속한 경계 디스플레이를 반환한다. 못 찾으면 전체 레이아웃을 대체로 반환.
+/// 진입 좌표가 속한 경계 디스플레이를 반환한다. 못 찾으면 전체 데스크톱을 대체로 반환.
 /// 진입/복귀 비율을 이 모니터 기준으로 계산해 클라이언트 화면과 일관되게 매핑한다.
 static CGRect edge_display_at(CGPoint loc) {
-    for (const CGRect& b : g_layout.edge_displays) {
+    for (const CGRect& b : g_layout.geo.edge_displays) {
         bool in_range = false;
         switch (g_cfg.client_edge) {
         case TETHER_EDGE_RIGHT:
@@ -148,8 +151,10 @@ static CGRect edge_display_at(CGPoint loc) {
         }
         if (in_range) return b;
     }
-    return CGRectMake(g_layout.left, g_layout.top,
-                      g_layout.right - g_layout.left, g_layout.height);
+    // 기준 화면이 지정된 경우 edge_displays 에 그 화면만 있으므로 첫 항목이 정답에 가깝다.
+    if (!g_layout.geo.edge_displays.empty()) return g_layout.geo.edge_displays.front();
+    return CGRectMake(g_layout.left(), g_layout.top(),
+                      g_layout.right() - g_layout.left(), g_layout.height);
 }
 
 // ── 원격 모드 상태 ────────────────────────────────────────────────────
@@ -157,16 +162,24 @@ static CGRect edge_display_at(CGPoint loc) {
 // RemoteState 정의는 EventTap.h 에 있다.
 // g_remote 인스턴스는 tether_core.cpp 에 있고, 아래에서 extern으로 참조한다.
 
+// 로컬(비원격) 상태의 직전 커서 위치. 내부 경계 통과 판정에 쓴다.
+// mouse_callback(RunLoop 스레드)에서만 접근한다.
+static CGPoint g_last_local_loc{};
+static bool    g_last_local_valid = false;
+
 /// 원격 진입 시 커서를 화면 밖으로 밀어두는 위치.
 /// CGEventTap이 계속 실행되는 동안 커서가 실제로 보이지 않도록 한다.
+/// 데스크톱 전체 경계 기준으로 밀어낸다. 기준 화면이 데스크톱 내부일 때
+/// trigger_edge 로 밀면 옆 디스플레이 안이라 커서가 그대로 보이므로,
+/// 항상 전체 영역(left/right/top/bottom) 바깥을 쓴다.
 static CGPoint offscreen_point() {
     switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  return CGPointMake(g_layout.right,          99999.0);
-    case TETHER_EDGE_LEFT:   return CGPointMake(g_layout.left - 9999.0,  g_layout.top);
-    case TETHER_EDGE_TOP:    return CGPointMake(99999.0,                 g_layout.top - 9999.0);
-    case TETHER_EDGE_BOTTOM: return CGPointMake(99999.0,                 g_layout.bottom);
+    case TETHER_EDGE_RIGHT:  return CGPointMake(g_layout.right(),          99999.0);
+    case TETHER_EDGE_LEFT:   return CGPointMake(g_layout.left() - 9999.0,  g_layout.top());
+    case TETHER_EDGE_TOP:    return CGPointMake(99999.0,                 g_layout.top() - 9999.0);
+    case TETHER_EDGE_BOTTOM: return CGPointMake(99999.0,                 g_layout.bottom());
     }
-    return CGPointMake(g_layout.right, 99999.0);
+    return CGPointMake(g_layout.right(), 99999.0);
 }
 
 /// 복귀 시 커서를 경계 바로 안쪽으로 되돌린다.
@@ -176,13 +189,25 @@ static CGPoint offscreen_point() {
 /// 복귀 커서가 경계에서 멀리 튀지 않도록 한다.
 static CGPoint return_point() {
     const double offset = 8.0;
-    switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
-    case TETHER_EDGE_LEFT:   return CGPointMake(g_layout.trigger_edge + offset, g_remote.return_y);
-    case TETHER_EDGE_TOP:    return CGPointMake(g_remote.return_x, g_layout.trigger_edge + offset);
-    case TETHER_EDGE_BOTTOM: return CGPointMake(g_remote.return_x, g_layout.trigger_edge - offset);
+    // 진입했던 기준 화면의 경계를 쓴다. 내부 경계(맥북+외장에서 맥북 오른쪽 등)에서
+    // 전역 trigger_edge 를 쓰면 복귀 커서가 엉뚱한 디스플레이에 놓인다.
+    const CGRect& d = g_remote.entry_display;
+    double e = g_layout.trigger_edge();
+    if (!CGRectIsEmpty(d)) {
+        switch (g_cfg.client_edge) {
+        case TETHER_EDGE_RIGHT:  e = d.origin.x + d.size.width;  break;
+        case TETHER_EDGE_LEFT:   e = d.origin.x;                 break;
+        case TETHER_EDGE_TOP:    e = d.origin.y;                 break;
+        case TETHER_EDGE_BOTTOM: e = d.origin.y + d.size.height; break;
+        }
     }
-    return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
+    switch (g_cfg.client_edge) {
+    case TETHER_EDGE_RIGHT:  return CGPointMake(e - offset, g_remote.return_y);
+    case TETHER_EDGE_LEFT:   return CGPointMake(e + offset, g_remote.return_y);
+    case TETHER_EDGE_TOP:    return CGPointMake(g_remote.return_x, e + offset);
+    case TETHER_EDGE_BOTTOM: return CGPointMake(g_remote.return_x, e - offset);
+    }
+    return CGPointMake(e - offset, g_remote.return_y);
 }
 
 /// 클라이언트가 보낸 복귀 비율(0~1, client 화면 기준)을 host 화면 좌표로 변환해
@@ -289,6 +314,11 @@ static void leave_remote() {
     CGAssociateMouseAndMouseCursorPosition(true);
     tether_show_cursor();
 
+    // 통과 판정 기준점을 복귀 위치로 리셋한다. 원격 중 남아 있던 옛 위치를 그대로 쓰면
+    // 복귀 직후 첫 이동이 경계를 "통과"한 것으로 오판될 수 있다 (내부 경계 모드).
+    g_last_local_loc = rp;
+    g_last_local_valid = true;
+
     // 복귀 시각 기록 — mouse_callback 에서 200ms 동안 재진입을 차단한다.
     g_remote.return_time = std::chrono::steady_clock::now();
     g_remote.active.store(false, std::memory_order_release);
@@ -373,6 +403,13 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
         return event;
     }
     if (!g_remote.active.load(std::memory_order_acquire)) {
+        CGPoint loc = CGEventGetLocation(event);
+        // 내부 경계 통과 판정용 직전 위치. 원격이 아닐 때 매 이벤트마다 갱신한다.
+        CGPoint prev = g_last_local_loc;
+        bool prev_valid = g_last_local_valid;
+        g_last_local_loc = loc;
+        g_last_local_valid = true;
+
         // 복귀 직후 짧게 재진입을 차단한다. 예측적 복귀로 커서가 경계에서 떨어진
         // 위치(return_point offset)에 놓이므로 warp 반영에 필요한 최소 시간만 둔다.
         // 값이 크면 복귀 직후 경계 근처 이동이 억눌려 끊김으로 느껴진다.
@@ -385,8 +422,11 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
                         type == kCGEventOtherMouseDragged);
         if (is_drag) return event;
 
-        CGPoint loc = CGEventGetLocation(event);
-        if (is_at_trigger_edge(loc)) enter_remote(loc);
+        bool by_crossing = false;
+        if (is_at_trigger_edge(loc, prev, prev_valid, &by_crossing)) {
+            // 통과로 트리거된 경우 진입점은 경계선상의 prev 다 (loc 은 이미 지나침).
+            enter_remote(by_crossing ? prev : loc);
+        }
         return event;
     }
 
@@ -406,8 +446,8 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     // 안에 들어와 있을 때만 다시 밀어낸다. 절대다수의 이동에서 warp RPC 가 제거된다.
     if (!is_scroll) {
         CGPoint loc = CGEventGetLocation(event);
-        bool cursor_visible = loc.x >= g_layout.left && loc.x <= g_layout.right &&
-                              loc.y >= g_layout.top  && loc.y <= g_layout.bottom;
+        bool cursor_visible = loc.x >= g_layout.left() && loc.x <= g_layout.right() &&
+                              loc.y >= g_layout.top()  && loc.y <= g_layout.bottom();
         if (cursor_visible)
             CGWarpMouseCursorPosition(offscreen_point());
     }
@@ -648,6 +688,27 @@ void request_leave_remote(double ratio) {
 
 // 연결 중 client 위치 변경. 레이아웃/커서 접근을 RunLoop 스레드로 일원화해
 // mouse_callback 및 디스플레이 재설정 콜백과 직렬화한다.
+// 전환 기준 화면 변경. edge 변경과 동일하게 RunLoop 스레드로 위임해
+// 레이아웃/커서 접근을 직렬화한다.
+void apply_trigger_display(const char* uuid) {
+    CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
+    if (!rl || rl == (CFRunLoopRef)-1) {
+        // 시작 전이면 값만 보관 — tether_start 의 refresh_layout 이 반영한다.
+        set_trigger_display_uuid(uuid);
+        return;
+    }
+
+    // 블록이 실행될 때까지 문자열이 살아 있어야 하므로 복사해 캡처한다.
+    std::string copy = uuid ? uuid : "";
+    CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
+        // 경계가 바뀌면 기존 원격 가상 좌표가 무의미하므로 먼저 복귀한다.
+        if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+        set_trigger_display_uuid(copy.c_str());
+        refresh_layout(g_cfg.client_edge);
+    });
+    CFRunLoopWakeUp(rl);
+}
+
 void apply_client_edge(TetherEdge edge) {
     CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
     if (!rl || rl == (CFRunLoopRef)-1) {

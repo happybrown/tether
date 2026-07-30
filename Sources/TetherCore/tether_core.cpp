@@ -253,6 +253,8 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     TETHER_INFO(CAT_NETWORK, "tether 시작: 호스트명=%s, 포트=%d", g_hostname, g_cfg.port);
 
     if (g_cfg.is_host) {
+        // 기준 화면은 레이아웃 계산 전에 반영해야 첫 refresh 부터 적용된다.
+        set_trigger_display_uuid(g_cfg.trigger_display_uuid);
         refresh_layout(g_cfg.client_edge);
 
         // host: ClientInfoPacket으로 클라이언트 화면 크기 수신
@@ -766,6 +768,46 @@ void tether_set_predict_leave(bool enabled) {
     // 덮어쓰지만, 실행 중 토글은 재시작 없이 다음 이동 이벤트부터 즉시 반영된다.
     g_predict_leave.store(enabled, std::memory_order_relaxed);
     g_cfg.predict_leave = enabled;  // 이후 재시작 시에도 유지
+}
+
+void tether_set_trigger_display(const char* uuid) {
+    // 실행 전에도 값을 보관해 다음 start 에 반영되게 한다 (client 모드에선 의미 없음).
+    strncpy(g_cfg.trigger_display_uuid, uuid ? uuid : "",
+            sizeof(g_cfg.trigger_display_uuid) - 1);
+    g_cfg.trigger_display_uuid[sizeof(g_cfg.trigger_display_uuid) - 1] = '\0';
+    if (g_status.load() == TETHER_STATUS_IDLE || !g_cfg.is_host) {
+        set_trigger_display_uuid(g_cfg.trigger_display_uuid);
+        return;
+    }
+    apply_trigger_display(g_cfg.trigger_display_uuid);
+}
+
+int tether_get_displays(TetherDisplayInfo* out, int max) {
+    CGDirectDisplayID ids[16];
+    uint32_t count = 0;
+    CGGetActiveDisplayList(16, ids, &count);
+    if (!out) return (int)count;
+    if (max <= 0) return 0;
+
+    int n = 0;
+    for (uint32_t i = 0; i < count && n < max; ++i) {
+        CGRect b = CGDisplayBounds(ids[i]);
+        TetherDisplayInfo& d = out[n];
+        d.uuid[0] = '\0';
+        if (CFUUIDRef u = CGDisplayCreateUUIDFromDisplayID(ids[i])) {
+            if (CFStringRef s = CFUUIDCreateString(kCFAllocatorDefault, u)) {
+                CFStringGetCString(s, d.uuid, sizeof(d.uuid), kCFStringEncodingUTF8);
+                CFRelease(s);
+            }
+            CFRelease(u);
+        }
+        d.x = b.origin.x;      d.y = b.origin.y;
+        d.width = b.size.width; d.height = b.size.height;
+        d.is_main    = CGDisplayIsMain(ids[i]);
+        d.is_builtin = CGDisplayIsBuiltin(ids[i]);
+        ++n;
+    }
+    return n;
 }
 
 bool tether_get_client_size(int32_t* width, int32_t* height) {

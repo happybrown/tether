@@ -34,6 +34,11 @@ typedef struct {
     // 경계와 평행한 축 기준으로 client 화면이 host 보다 아래/오른쪽에 있으면 양수.
     // 해상도 차이 등으로 전환 위치가 어긋날 때 미세조정한다.
     double    client_offset;
+    // host: 전환 기준 화면의 디스플레이 UUID (CGDisplayCreateUUIDFromDisplayID 문자열).
+    // 빈 문자열이면 자동 — 전체 데스크톱의 가장 바깥 경계(기존 동작).
+    // 지정하면 그 디스플레이의 client_edge 방향 경계에서만 원격으로 전환한다.
+    // (멀티 모니터에서 "맥북 화면 오른쪽 → 상대 Mac" 같은 내부 경계 지정 가능)
+    char      trigger_display_uuid[40];
 } TetherConfig;
 
 #ifndef TETHER_LOG_LEVEL_DEFINED
@@ -102,6 +107,24 @@ void tether_set_client_offset(double offset);
 // host: 연결된 client 의 화면 크기를 조회한다 (설정 UI 의 배치 시각화용).
 // client 가 ClientInfoPacket 을 보내기 전(미연결 포함)이면 false 를 반환한다.
 bool tether_get_client_size(int32_t* width, int32_t* height);
+
+// host: 전환 기준 화면을 실시간으로 변경한다 (NULL/빈 문자열 = 자동).
+// 실행 중이면 레이아웃을 즉시 재계산한다. 해당 디스플레이가 분리되면 자동으로 폴백.
+void tether_set_trigger_display(const char* uuid);
+
+// 로컬 디스플레이 정보 (설정 UI 의 배치 시각화 및 기준 화면 선택용).
+// bounds 는 macOS 전역 좌표(주 디스플레이 좌상단이 원점, y 아래로 증가).
+typedef struct {
+    char   uuid[40];     // 재부팅에도 안정적인 디스플레이 식별자
+    double x, y;         // 좌상단 위치 (전역 좌표)
+    double width, height;
+    bool   is_main;      // 주 디스플레이(메뉴바가 있는 화면) 여부
+    bool   is_builtin;   // 내장 디스플레이(맥북 화면) 여부
+} TetherDisplayInfo;
+
+// 현재 연결된 디스플레이 목록을 out 배열에 채운다.
+// 반환값: 기록한 개수 (max 로 잘림). out=NULL 이면 전체 개수만 조회.
+int tether_get_displays(TetherDisplayInfo* out, int max);
 
 // Cmd+Shift+Esc 감지 시 호출될 콜백 등록 (host 모드 전용).
 // cb 는 CGEventTap RunLoop 스레드에서 호출되므로 내부에서 비동기 처리해야 한다.

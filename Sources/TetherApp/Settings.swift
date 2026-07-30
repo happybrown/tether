@@ -61,6 +61,11 @@ class AppSettings: ObservableObject {
     @Published var clientOffset: Double {
         didSet { save() }
     }
+    // 전환 기준 화면의 디스플레이 UUID. 빈 문자열이면 자동(데스크톱 최외곽 경계).
+    // 멀티 모니터에서 "맥북 화면 오른쪽 → 상대 Mac" 처럼 특정 화면을 지정할 때 쓴다.
+    @Published var triggerDisplayUUID: String {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -76,6 +81,7 @@ class AppSettings: ObservableObject {
         // 기본값 false. bool(forKey:)는 미설정 시 false 라 키 존재 여부로 판단한다.
         predictLeave       = defaults.object(forKey: "predictLeave") as? Bool ?? false
         clientOffset       = defaults.object(forKey: "clientOffset") as? Double ?? 0
+        triggerDisplayUUID = defaults.string(forKey: "triggerDisplayUUID") ?? ""
     }
 
     private func save() {
@@ -89,6 +95,7 @@ class AppSettings: ObservableObject {
         defaults.set(psk, forKey: "psk")
         defaults.set(predictLeave, forKey: "predictLeave")
         defaults.set(clientOffset, forKey: "clientOffset")
+        defaults.set(triggerDisplayUUID, forKey: "triggerDisplayUUID")
     }
 }
 
