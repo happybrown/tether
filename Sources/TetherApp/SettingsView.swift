@@ -2,40 +2,52 @@ import SwiftUI
 
 /// 설정 창의 탭. 로그 뷰도 여기에 통합되어 하나의 창으로 동작한다.
 /// 사이드바 항목의 아이콘·라벨도 여기서 단일 소스로 관리한다.
+///
+/// 분류 기준:
+/// - 연결: 세션을 맺는 데 필요한 모든 것 (역할·IP·포트·공유 암호). "적용" 바를 공유하는
+///   IP/Port/PSK 를 한 곳에 모아 흩어진 저장 동작을 없앤다.
+/// - 제어: 연결 이후의 커서·입력 동작 (모니터 배치, 복귀 예측, 단축키). host 전용.
+/// - 진단: 네트워크 성능 측정. (연결 탭의 "포트" 와 혼동되던 옛 "네트워크" 탭을 개명)
 enum SettingsTab: Hashable, CaseIterable, Identifiable {
-    case connection, security, network, general, logs
+    case connection, control, diagnostics, general, logs
 
     var id: Self { self }
 
     var label: String {
         switch self {
-        case .connection: return "연결"
-        case .security:   return "보안"
-        case .network:    return "네트워크"
-        case .general:    return "일반"
-        case .logs:       return "로그"
+        case .connection:  return "연결"
+        case .control:     return "제어"
+        case .diagnostics: return "진단"
+        case .general:     return "일반"
+        case .logs:        return "로그"
         }
     }
 
     var icon: String {
         switch self {
-        case .connection: return "network"
-        case .security:   return "lock"
-        case .network:    return "speedometer"
-        case .general:    return "slider.horizontal.3"
-        case .logs:       return "doc.text.magnifyingglass"
+        case .connection:  return "network"
+        case .control:     return "cursorarrow.motionlines"
+        case .diagnostics: return "speedometer"
+        case .general:     return "slider.horizontal.3"
+        case .logs:        return "doc.text.magnifyingglass"
         }
     }
 
     /// 사이드바 아이콘 배경 틴트 (시각적 구분).
     var tint: Color {
         switch self {
-        case .connection: return .blue
-        case .security:   return .green
-        case .network:    return .orange
-        case .general:    return .gray
-        case .logs:       return .purple
+        case .connection:  return .blue
+        case .control:     return .indigo
+        case .diagnostics: return .orange
+        case .general:     return .gray
+        case .logs:        return .purple
         }
+    }
+
+    /// 모드별 표시 여부. 제어 탭의 항목(배치·복귀 예측·단축키)은 전부 host 전용이라
+    /// client 모드에서는 탭 자체를 숨긴다.
+    static func visibleTabs(for mode: AppMode) -> [SettingsTab] {
+        allCases.filter { $0 != .control || mode == .host }
     }
 }
 
@@ -89,6 +101,12 @@ struct SettingsView: View {
         .onChange(of: settings.psk) { newValue in
             if pskString != newValue { pskString = newValue }
         }
+        // client 모드로 바뀌면 host 전용 탭(제어)이 사라지므로 연결 탭으로 되돌린다.
+        .onChange(of: settings.mode) { newMode in
+            if !SettingsTab.visibleTabs(for: newMode).contains(selectedTab) {
+                selectedTab = .connection
+            }
+        }
     }
 
     /// 편집 State 를 저장값과 동기화한다 (창 열릴 때 / 적용 후).
@@ -104,7 +122,7 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         List(selection: $selectedTab) {
-            ForEach(SettingsTab.allCases) { tab in
+            ForEach(SettingsTab.visibleTabs(for: settings.mode)) { tab in
                 Label {
                     Text(tab.label)
                         .font(.system(size: 13))
@@ -128,11 +146,11 @@ struct SettingsView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch selectedTab {
-        case .connection: connectionTab
-        case .security:   securityTab
-        case .network:    NetworkTestView()
-        case .general:    generalTab
-        case .logs:       LogView()
+        case .connection:  connectionTab
+        case .control:     controlTab
+        case .diagnostics: NetworkTestView()
+        case .general:     generalTab
+        case .logs:        LogView()
         }
     }
 
@@ -178,7 +196,8 @@ struct SettingsView: View {
     }
 
     // ── 탭: 연결 ──────────────────────────────────────────────────
-    // 모드·권한·연결 대상·네트워크 등 세션을 맺는 데 필요한 설정을 모은다.
+    // 세션을 맺는 데 필요한 모든 설정: 역할·권한·연결 대상·포트·공유 암호.
+    // "적용" 바를 공유하는 IP/Port/PSK 가 모두 이 탭에 있다.
 
     private var connectionTab: some View {
         tabScroll {
@@ -188,28 +207,28 @@ struct SettingsView: View {
             }
             connectionSection
             networkSection
-            connectionApplyBar
-        }
-    }
-
-    // ── 탭: 보안 ──────────────────────────────────────────────────
-
-    private var securityTab: some View {
-        tabScroll {
             securitySection
             connectionApplyBar
         }
     }
 
+    // ── 탭: 제어 (host 전용) ──────────────────────────────────────
+    // 연결 이후의 커서·입력 동작: 모니터 배치, 복귀 예측, 단축키.
+
+    private var controlTab: some View {
+        tabScroll {
+            layoutSection
+            behaviorSection
+            shortcutSection
+        }
+    }
+
     // ── 탭: 일반 ──────────────────────────────────────────────────
-    // 자동 실행 등 일반 옵션과 host 모드 단축키 안내.
+    // 자동 실행 등 앱 수준 옵션과 정보.
 
     private var generalTab: some View {
         tabScroll {
             generalSection
-            if settings.mode == .host {
-                shortcutSection
-            }
             aboutSection
         }
     }
@@ -287,63 +306,89 @@ struct SettingsView: View {
     private var connectionSection: some View {
         FormSection(title: settings.mode == .host ? "Host 설정" : "Client 설정",
                     icon: settings.mode == .host ? "desktopcomputer" : "laptopcomputer") {
-            VStack(spacing: 0) {
-                if settings.mode == .host {
-                    FormRow(label: "내 IP 주소") {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            if manager.localIPs.isEmpty {
-                                Text("없음").foregroundStyle(.secondary)
-                                    .font(.system(.body, design: .monospaced))
-                            } else {
-                                ForEach(manager.localIPs, id: \.self) { ip in
-                                    Text(ip).font(.system(.body, design: .monospaced))
-                                        .textSelection(.enabled)
-                                }
+            if settings.mode == .host {
+                FormRow(label: "내 IP 주소") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if manager.localIPs.isEmpty {
+                            Text("없음").foregroundStyle(.secondary)
+                                .font(.system(.body, design: .monospaced))
+                        } else {
+                            ForEach(manager.localIPs, id: \.self) { ip in
+                                Text(ip).font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
                             }
                         }
                     }
-                    Divider().padding(.leading, 16)
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("모니터 배치")
-                                .font(.system(size: 13))
-                            Spacer()
-                            Text("상대 Mac 위치를 클릭하세요")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                        }
-                        MonitorLayoutView(edge: $settings.clientEdge)
-                            .frame(maxWidth: .infinity)
-                            .onChange(of: settings.clientEdge) { manager.updateClientEdge($0) }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    Divider().padding(.leading, 16)
-                    FormRow(label: "원격 복귀 예측") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Toggle("", isOn: $settings.predictLeave)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .onChange(of: settings.predictLeave) { manager.updatePredictLeave($0) }
-                            Text("반대편 경계 이탈을 Host 가 직접 예측해 지연 없이 복귀합니다.\n끄면 Client 신호로만 복귀합니다(약간 느리지만 오탐 없음).")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                                .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                FormRow(label: "Host IP") {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        TextField("예: 192.168.0.10", text: $hostIPString)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
+                            .onSubmit { applyConnectionSettings() }
+                        if let err = hostIPError {
+                            Text(err).font(.system(size: 10)).foregroundStyle(.red)
                         }
                     }
-                } else {
-                    FormRow(label: "Host IP") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            TextField("예: 192.168.0.10", text: $hostIPString)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 200)
-                                .onSubmit { applyConnectionSettings() }
-                            if let err = hostIPError {
-                                Text(err).font(.system(size: 10)).foregroundStyle(.red)
-                            }
-                        }
-                    }
+                }
+            }
+        }
+    }
+
+    // ── 모니터 배치 (제어 탭) ──────────────────────────────────────
+
+    private var layoutSection: some View {
+        FormSection(title: "모니터 배치", icon: "display.2") {
+            VStack(alignment: .leading, spacing: 10) {
+                // 실제 해상도 비례 사각형. 드래그로 방향(edge)과 정렬 오프셋을 함께 조절.
+                MonitorLayoutView(
+                    edge: $settings.clientEdge,
+                    offset: $settings.clientOffset,
+                    hostResolution: NSScreen.main?.frame.size ?? CGSize(width: 16, height: 10),
+                    clientResolution: manager.clientScreenSize
+                )
+                .frame(maxWidth: .infinity)
+                .onChange(of: settings.clientEdge) { manager.updateClientEdge($0) }
+                .onChange(of: settings.clientOffset) { manager.updateClientOffset($0) }
+
+                HStack(spacing: 8) {
+                    Text("정렬 오프셋")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%+d%%", Int((settings.clientOffset * 100).rounded())))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("가운데 정렬") { settings.clientOffset = 0 }
+                        .buttonStyle(.link)
+                        .font(.system(size: 10))
+                        .disabled(settings.clientOffset == 0)
+                }
+                Text("상대 Mac 사각형을 끌어 배치하세요. 전환 위치가 위아래(또는 좌우)로 어긋나면 경계 방향으로 끌어 보정합니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+
+    // ── 커서 동작 (제어 탭) ────────────────────────────────────────
+
+    private var behaviorSection: some View {
+        FormSection(title: "커서 동작", icon: "cursorarrow") {
+            FormRow(label: "원격 복귀 예측") {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Toggle("", isOn: $settings.predictLeave)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: settings.predictLeave) { manager.updatePredictLeave($0) }
+                    Text("반대편 경계 이탈을 Host 가 직접 예측해 지연 없이 복귀합니다.\n끄면 Client 신호로만 복귀합니다(약간 느리지만 오탐 없음).")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -469,7 +514,7 @@ struct SettingsView: View {
     // ── 단축키 ────────────────────────────────────────────────────
 
     private var shortcutSection: some View {
-        FormSection(title: "단축키 (Host 모드)", icon: "keyboard") {
+        FormSection(title: "단축키", icon: "keyboard") {
             VStack(spacing: 0) {
                 ShortcutRow(
                     keys: ["⌘", "Esc"],

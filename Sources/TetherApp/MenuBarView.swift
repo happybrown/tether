@@ -243,7 +243,8 @@ struct MenuBarView: View {
     }
 
     private var pskMismatchRow: some View {
-        Button(action: { openSettings(.security) }) {
+        // 공유 암호는 연결 탭(보안 섹션)에 있다.
+        Button(action: { openSettings(.connection) }) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
