@@ -20,13 +20,15 @@ static const uint8_t PACKET_HELLO       = 2; // client → host: 인증 요청
 static const uint8_t PACKET_AUTH        = 3; // host → client: 인증 응답
 static const uint8_t PACKET_PING        = 4; // client → host: 연결 유지 확인
 static const uint8_t PACKET_PONG        = 5; // host → client: PING 응답
-static const uint8_t PACKET_CLIPBOARD   = 6; // 양방향: 클립보드 텍스트 동기화
+static const uint8_t PACKET_CLIPBOARD   = 6; // 양방향: 클립보드 동기화 (텍스트/이미지, 첫 바이트가 형식)
 static const uint8_t PACKET_CLIENT_INFO = 7; // client → host: 화면 크기 전달
 static const uint8_t PACKET_LEAVE       = 8; // client → host: 반대편 경계 이탈 복귀 요청
 static const uint8_t PACKET_PROBE       = 9; // 양방향: 네트워크 성능(RTT) 측정 요청/응답
 
-// 클립보드 패킷 최대 페이로드 크기
-static const uint32_t CLIPBOARD_MAX_BYTES = 60 * 1024;
+// 클립보드 패킷 최대 페이로드 크기. 이미지(PNG)까지 수용하도록 8MB.
+// 8MB / 1400B ≈ 5992 청크로 total_chunks(uint16) 범위 내이다.
+// 공개 헤더의 TETHER_CLIPBOARD_MAX_BYTES 와 일치해야 한다 (tether_core.cpp 에서 검증).
+static const uint32_t CLIPBOARD_MAX_BYTES = 8 * 1024 * 1024;
 // 단일 전송 청크의 페이로드 크기 (MTU 1500 - IP 20 - UDP 8 - 청크 헤더 13 = 1459, 안전 마진 적용)
 static const uint32_t CLIPBOARD_CHUNK_SIZE = 1400;
 // 클립보드 청크 헤더 크기: type(1) + msg_id(2) + chunk_index(2) + total_chunks(2) + total_len(4) + payload_len(2)

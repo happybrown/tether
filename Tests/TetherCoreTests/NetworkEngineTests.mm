@@ -338,4 +338,64 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertTrue(got == payload, @"재조립 내용 불일치");
 }
 
+// 이미지 크기급(수백 KB) 페이로드가 페이싱 전송으로 유실 없이 재조립되는지 검증
+- (void)test_clipboard_imageSizedPayload_reassembled {
+    int port = next_test_port();
+
+    std::atomic<bool>    received{false};
+    std::vector<uint8_t> got;
+
+    auto on_clipboard = [&](const uint8_t* data, uint32_t len) {
+        got.assign(data, data + len);
+        received.store(true);
+    };
+
+    NetworkEngine host(nullptr, port, nullptr, nullptr, nullptr, nullptr,
+                       nullptr, nullptr, on_clipboard);
+    NetworkEngine client("127.0.0.1", port);
+    host.start();
+    client.start();
+
+    // 스크린샷 PNG 수준의 크기 (약 715청크). 상한(8MB) 이내여야 한다.
+    const uint32_t total = 1024 * 1024;
+    XCTAssertLessThanOrEqual(total, CLIPBOARD_MAX_BYTES);
+    std::vector<uint8_t> payload(total);
+    for (uint32_t i = 0; i < total; ++i) payload[i] = (uint8_t)(i * 131 + 3);
+
+    client.send_clipboard(payload.data(), total);
+
+    bool ok = wait_for(received, 5000);
+    host.stop();
+    client.stop();
+
+    XCTAssertTrue(ok, @"이미지 크기 클립보드 수신 타임아웃");
+    XCTAssertEqual(got.size(), (size_t)total, @"재조립 길이 불일치");
+    XCTAssertTrue(got == payload, @"재조립 내용 불일치");
+}
+
+// 상한 초과 페이로드는 잘라 보내지 않고 통째로 폐기되는지 검증
+- (void)test_clipboard_oversizedPayload_dropped {
+    int port = next_test_port();
+
+    std::atomic<bool> received{false};
+    auto on_clipboard = [&](const uint8_t*, uint32_t) { received.store(true); };
+
+    NetworkEngine host(nullptr, port, nullptr, nullptr, nullptr, nullptr,
+                       nullptr, nullptr, on_clipboard);
+    NetworkEngine client("127.0.0.1", port);
+    host.start();
+    client.start();
+
+    // 상한 + 1 바이트 — 실제 데이터는 첫 청크 판정 전에 거부되므로 작은 버퍼로 충분하지만,
+    // 인터페이스 계약(len 기준 거부)을 그대로 검증하기 위해 전체 크기로 만든다.
+    std::vector<uint8_t> payload(CLIPBOARD_MAX_BYTES + 1, 0xAB);
+    client.send_clipboard(payload.data(), (uint32_t)payload.size());
+
+    bool ok = wait_for(received, 300);
+    host.stop();
+    client.stop();
+
+    XCTAssertFalse(ok, @"상한 초과 클립보드는 전송되지 않아야 함");
+}
+
 @end

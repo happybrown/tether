@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include "TetherLog.h"
 #include <thread>
+#include <chrono>
 #include <atomic>
 #include <functional>
 #include <utility>
@@ -190,30 +191,37 @@ public:
         send_raw(pkt, sizeof(pkt));
     }
 
-    // 클립보드 텍스트 전송 (양방향)
-    // MTU 초과 텍스트를 CLIPBOARD_CHUNK_SIZE 단위로 쪼개 여러 청크로 전송한다.
+    // 클립보드 페이로드 전송 (양방향, 텍스트/이미지 공용)
+    // MTU 초과 데이터를 CLIPBOARD_CHUNK_SIZE 단위로 쪼개 여러 청크로 전송한다.
     // 각 청크 헤더로 수신 측이 순서·유실을 감지해 재조립한다.
     // 형식: [PACKET_CLIPBOARD(1) | msg_id(2) | chunk_index(2) | total_chunks(2)
     //        | total_len(4) | payload_len(2)] + payload
     void send_clipboard(const uint8_t* data, uint32_t len) {
         if (len == 0) return;
-        // 최대 크기 초과분은 잘라 전송 (수신 측 상한과 일치)
-        uint32_t total_len = std::min(len, CLIPBOARD_MAX_BYTES);
-        uint16_t total_chunks = (uint16_t)((total_len + CLIPBOARD_CHUNK_SIZE - 1) / CLIPBOARD_CHUNK_SIZE);
+        // 잘린 페이로드는 텍스트든 이미지든 쓸모없으므로 상한 초과 시 전송을 포기한다.
+        if (len > CLIPBOARD_MAX_BYTES) {
+            TETHER_INFO(CAT_NETWORK, "clipboard payload too large (%u bytes) — skipped", len);
+            return;
+        }
+        uint16_t total_chunks = (uint16_t)((len + CLIPBOARD_CHUNK_SIZE - 1) / CLIPBOARD_CHUNK_SIZE);
         uint16_t msg_id = next_clip_msg_id_++;
 
         std::vector<uint8_t> buf(CLIPBOARD_HEADER_SIZE + CLIPBOARD_CHUNK_SIZE);
         for (uint16_t idx = 0; idx < total_chunks; ++idx) {
             uint32_t offset = (uint32_t)idx * CLIPBOARD_CHUNK_SIZE;
-            uint16_t payload_len = (uint16_t)std::min(CLIPBOARD_CHUNK_SIZE, total_len - offset);
+            uint16_t payload_len = (uint16_t)std::min(CLIPBOARD_CHUNK_SIZE, len - offset);
             buf[0] = PACKET_CLIPBOARD;
             memcpy(&buf[1], &msg_id, 2);
             memcpy(&buf[3], &idx, 2);
             memcpy(&buf[5], &total_chunks, 2);
-            memcpy(&buf[7], &total_len, 4);
+            memcpy(&buf[7], &len, 4);
             memcpy(&buf[11], &payload_len, 2);
             memcpy(&buf[CLIPBOARD_HEADER_SIZE], data + offset, payload_len);
             send_raw(buf.data(), CLIPBOARD_HEADER_SIZE + payload_len);
+            // 큰 이미지를 한 번에 쏟아내면 수신 소켓 버퍼(256KB)가 넘쳐 청크가 유실되고
+            // 재조립 전체가 실패한다. 32청크(약 45KB)마다 1ms 쉬어 수신 측에 여유를 준다.
+            // 8MB 기준 총 지연 약 190ms — 호출부가 백그라운드 스레드라 UI 영향 없음.
+            if ((idx & 31) == 31) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 

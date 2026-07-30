@@ -17,12 +17,14 @@ class TetherManager: ObservableObject {
 
     private var permissionTimer: Timer?
     private var clipboardTimer: Timer?
-    // 마지막으로 전송한 클립보드 내용 (중복 전송 방지)
-    private var lastSentClipboard: String = ""
-    // 마지막으로 수신한 클립보드 내용 (루프 방지)
-    private var lastReceivedClipboard: String = ""
+    // 마지막으로 전송한 클립보드 페이로드 (중복 전송 방지)
+    private var lastSentClipboard = Data()
+    // 마지막으로 수신한 클립보드 페이로드 (루프 방지)
+    private var lastReceivedClipboard = Data()
     // NSPasteboard changeCount 기반 변경 감지 (폴링 효율화)
     private var lastChangeCount: Int = 0
+    // 큰 이미지 전송은 C 코어의 청크 페이싱으로 수백 ms 걸리므로 메인 스레드 밖에서 보낸다
+    private let clipboardSendQueue = DispatchQueue(label: "tether.clipboard.send")
 
     private init() {
         refreshLocalIPs()
@@ -202,16 +204,15 @@ class TetherManager: ObservableObject {
     // MARK: - Clipboard Sharing
 
     /// C++ 쪽에서 클립보드 수신 시 호출될 콜백을 등록한다.
+    /// 페이로드는 [형식 1B(TetherClipFormat)] + 내용. 버퍼는 콜백 반환 후 무효화되므로 즉시 복사한다.
     private func registerClipboardCallback() {
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         tether_set_clipboard_callback({ data, len, ctx in
-            guard let data, let ctx else { return }
+            guard let data, let ctx, len > 1 else { return }
             let manager = Unmanaged<TetherManager>.fromOpaque(ctx).takeUnretainedValue()
-            let text = String(bytes: UnsafeBufferPointer(start: data, count: Int(len)),
-                              encoding: .utf8) ?? ""
-            guard !text.isEmpty else { return }
+            let payload = Data(bytes: data, count: Int(len))
             DispatchQueue.main.async {
-                manager.applyReceivedClipboard(text)
+                manager.applyReceivedClipboard(payload)
             }
         }, selfPtr)
     }
@@ -222,14 +223,21 @@ class TetherManager: ObservableObject {
     // 이 마커로 macOS 의 느린 중복 동기화(“다른 컴퓨터에서 붙여넣는 중…” 창)를 막는다.
     private static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
 
-    private func applyReceivedClipboard(_ text: String) {
-        guard text != lastReceivedClipboard else { return }
-        lastReceivedClipboard = text
+    private func applyReceivedClipboard(_ payload: Data) {
+        guard payload != lastReceivedClipboard else { return }
+        lastReceivedClipboard = payload
         // 로컬 클립보드에 적용 (이 값을 다시 감지해 전송하지 않도록 lastSentClipboard 도 갱신)
-        lastSentClipboard = text
-        // setString 대신 NSPasteboardItem 으로 문자열 + 제외 마커를 함께 쓴다.
+        lastSentClipboard = payload
+
+        // 첫 바이트가 형식(TetherClipFormat), 나머지가 내용
+        let content = payload.dropFirst()
         let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
+        if payload[payload.startIndex] == UInt8(TETHER_CLIP_PNG.rawValue) {
+            item.setData(Data(content), forType: .png)
+        } else {
+            guard let text = String(data: content, encoding: .utf8), !text.isEmpty else { return }
+            item.setString(text, forType: .string)
+        }
         item.setString("", forType: Self.concealedType)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([item])
@@ -237,10 +245,32 @@ class TetherManager: ObservableObject {
         lastChangeCount = NSPasteboard.general.changeCount
     }
 
+    /// 현재 클립보드 내용을 전송용 페이로드([형식 1B] + 내용)로 만든다.
+    /// 이미지가 있으면 이미지를 우선한다 (이미지 복사 시 부가 텍스트가 함께 실리는 경우 대비).
+    private func currentClipboardPayload() -> Data? {
+        let pb = NSPasteboard.general
+        if let png = imagePNGData(from: pb) {
+            return Data([UInt8(TETHER_CLIP_PNG.rawValue)]) + png
+        }
+        if let text = pb.string(forType: .string), !text.isEmpty {
+            return Data([UInt8(TETHER_CLIP_TEXT.rawValue)]) + Data(text.utf8)
+        }
+        return nil
+    }
+
+    /// 클립보드의 이미지를 PNG 데이터로 읽는다. PNG 가 없으면 TIFF 를 PNG 로 변환한다
+    /// (스크린샷은 PNG, 대부분의 앱 이미지 복사는 TIFF 로 실린다).
+    private func imagePNGData(from pb: NSPasteboard) -> Data? {
+        if let png = pb.data(forType: .png) { return png }
+        guard let tiff = pb.data(forType: .tiff),
+              let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
     /// 연결된 동안 클립보드를 0.5초 간격으로 폴링해 변경 시 상대방에 전송한다.
     private func startClipboardPolling() {
         stopClipboardPolling()
-        lastSentClipboard = NSPasteboard.general.string(forType: .string) ?? ""
+        lastSentClipboard = currentClipboardPayload() ?? Data()
         lastChangeCount = NSPasteboard.general.changeCount
         clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pollAndSendClipboard() }
@@ -259,16 +289,19 @@ class TetherManager: ObservableObject {
         guard currentCount != lastChangeCount else { return }
         lastChangeCount = currentCount
 
-        let current = NSPasteboard.general.string(forType: .string) ?? ""
-        guard !current.isEmpty,
-              current != lastSentClipboard,
-              current != lastReceivedClipboard else { return }
+        guard let payload = currentClipboardPayload(),
+              payload != lastSentClipboard,
+              payload != lastReceivedClipboard else { return }
+        // C 코어 상한 초과분(초대형 이미지)은 어차피 폐기되므로 복사 전에 거른다
+        guard payload.count <= Int(TETHER_CLIPBOARD_MAX_BYTES) else { return }
 
-        lastSentClipboard = current
-        guard let data = current.data(using: .utf8) else { return }
-        data.withUnsafeBytes { ptr in
-            if let base = ptr.bindMemory(to: UInt8.self).baseAddress {
-                tether_send_clipboard(base, UInt32(data.count))
+        lastSentClipboard = payload
+        // 큰 이미지는 청크 페이싱으로 전송에 수백 ms 걸리므로 메인 스레드를 막지 않는다
+        clipboardSendQueue.async {
+            payload.withUnsafeBytes { ptr in
+                if let base = ptr.bindMemory(to: UInt8.self).baseAddress {
+                    tether_send_clipboard(base, UInt32(payload.count))
+                }
             }
         }
     }

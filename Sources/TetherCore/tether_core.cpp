@@ -158,7 +158,14 @@ void tether_set_force_stop_callback(TetherForceStopCallback cb, void* ctx) {
     });
 }
 
+// 공개 헤더와 내부 프로토콜의 클립보드 상한이 어긋나면 컴파일 단계에서 잡는다.
+static_assert(CLIPBOARD_MAX_BYTES == TETHER_CLIPBOARD_MAX_BYTES,
+              "clipboard max size mismatch between protocol.h and tether_core.h");
+
 void tether_send_clipboard(const uint8_t* data, uint32_t len) {
+    // 큰 이미지 전송(페이싱 포함 수백 ms)을 위해 Swift 가 백그라운드 스레드에서 호출한다.
+    // 전송 중 tether_stop 이 g_engine 을 파괴하지 않도록 생명주기 lock 으로 보호한다.
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
     if (!g_engine) return;
     // 연결 확인은 모드별로 다르다. g_auth_ok 는 client 전용 상태(host 로부터 AUTH_ACK
     // 수신 여부)라, 이것만 검사하면 host 에선 항상 false → host→client 클립보드가

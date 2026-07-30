@@ -47,6 +47,17 @@ typedef void (*TetherStatusCallback)(TetherStatus status, const char* message, v
 // 로그 콜백 — 레벨, 카테고리, 메시지를 Swift로 전달
 typedef void (*TetherLogCallback)(TetherLogLevel level, const char* category, const char* message, void* ctx);
 
+// 클립보드 페이로드 형식 — 페이로드 첫 바이트로 구분한다.
+// C 코어는 바이트를 그대로 나르고, 형식 해석은 양쪽 Swift 계층이 담당한다.
+typedef enum {
+    TETHER_CLIP_TEXT = 0, // UTF-8 텍스트
+    TETHER_CLIP_PNG  = 1, // PNG 이미지
+} TetherClipFormat;
+
+// 클립보드 페이로드 최대 크기 (형식 바이트 포함).
+// protocol.h 의 CLIPBOARD_MAX_BYTES 와 반드시 일치해야 한다 (tether_core.cpp 에서 검증).
+enum { TETHER_CLIPBOARD_MAX_BYTES = 8 * 1024 * 1024 };
+
 // 클립보드 수신 콜백 — 상대방 클립보드 변경 시 Swift로 전달
 typedef void (*TetherClipboardCallback)(const uint8_t* data, uint32_t len, void* ctx);
 
@@ -55,7 +66,8 @@ void tether_set_log_callback(TetherLogCallback cb, void* ctx);
 // 클립보드 수신 콜백 등록 — tether_start 전에 호출
 void tether_set_clipboard_callback(TetherClipboardCallback cb, void* ctx);
 
-// 클립보드 텍스트를 상대방에게 전송 (UTF-8, 인증 완료 상태에서만 동작)
+// 클립보드 페이로드([형식 1B] + 내용)를 상대방에게 전송 (인증 완료 상태에서만 동작).
+// 큰 이미지 전송은 내부 페이싱으로 수백 ms 걸릴 수 있으므로 백그라운드 스레드에서 호출할 것.
 void tether_send_clipboard(const uint8_t* data, uint32_t len);
 
 // 세션 시작/중지
