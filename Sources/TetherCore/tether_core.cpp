@@ -129,6 +129,14 @@ static void*                  g_clipboard_ctx = nullptr;
 std::atomic<int32_t> g_client_width{32000};
 std::atomic<int32_t> g_client_height{18000};
 
+// host: client 화면 정렬 오프셋 (-1.0 ~ +1.0, client 화면 크기 대비 비율).
+// EventTap.cpp 의 진입/복귀 비율 변환에서 참조한다. 자세한 의미는 tether_core.h 참고.
+std::atomic<double> g_client_offset{0.0};
+
+// host: ClientInfoPacket 수신 여부. g_client_width/height 의 기본값(sentinel)과
+// 실제 수신값을 구분해, 설정 UI 가 "크기 미상" 상태를 표시할 수 있게 한다.
+static std::atomic<bool> g_client_size_known{false};
+
 // 원격 모드 / 클라이언트 상태 (EventTap.cpp, ClientHandler.cpp 에서 extern 참조)
 RemoteState g_remote;
 ClientState g_client;
@@ -235,6 +243,8 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     g_auth_ok.store(false, std::memory_order_release);
     g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
     g_predict_leave.store(g_cfg.predict_leave, std::memory_order_relaxed);
+    g_client_offset.store(std::clamp(g_cfg.client_offset, -1.0, 1.0), std::memory_order_relaxed);
+    g_client_size_known.store(false, std::memory_order_release);
     // 원격 모드 빠른 복귀 타임아웃: PING 주기의 2배(최소 10초). PING 1회 유실로 복귀 방지.
     g_remote_fast_timeout_s = std::max(10, g_reconnect_interval_s * 2);
     // 시작 직후 경계에 커서가 있어도 즉시 원격 진입하지 않도록 보호 시각을 현재로 설정한다.
@@ -249,6 +259,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
         auto on_client_info = [](const ClientInfoPacket& pkt) {
             g_client_width.store(pkt.width, std::memory_order_relaxed);
             g_client_height.store(pkt.height, std::memory_order_relaxed);
+            g_client_size_known.store(true, std::memory_order_release);
             TETHER_DEBUG(CAT_NETWORK, "[호스트] 클라이언트 화면 크기=%dx%d", pkt.width, pkt.height);
         };
 
@@ -755,6 +766,21 @@ void tether_set_predict_leave(bool enabled) {
     // 덮어쓰지만, 실행 중 토글은 재시작 없이 다음 이동 이벤트부터 즉시 반영된다.
     g_predict_leave.store(enabled, std::memory_order_relaxed);
     g_cfg.predict_leave = enabled;  // 이후 재시작 시에도 유지
+}
+
+bool tether_get_client_size(int32_t* width, int32_t* height) {
+    if (!g_client_size_known.load(std::memory_order_acquire)) return false;
+    if (width)  *width  = g_client_width.load(std::memory_order_relaxed);
+    if (height) *height = g_client_height.load(std::memory_order_relaxed);
+    return true;
+}
+
+void tether_set_client_offset(double offset) {
+    // predict_leave 와 같은 방식의 실시간 갱신. 값 하나만 바꾸므로 RunLoop 위임이 필요 없고,
+    // 다음 진입/복귀 비율 계산부터 즉시 반영된다.
+    double clamped = std::clamp(offset, -1.0, 1.0);
+    g_client_offset.store(clamped, std::memory_order_relaxed);
+    g_cfg.client_offset = clamped;  // 이후 재시작 시에도 유지
 }
 
 void tether_displays_changed() {

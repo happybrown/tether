@@ -21,6 +21,7 @@ extern CFMachPortRef            g_mouse_tap;
 extern CFMachPortRef            g_key_tap;
 extern std::atomic<int32_t>     g_client_width;
 extern std::atomic<int32_t>     g_client_height;
+extern std::atomic<double>      g_client_offset;  // client 화면 정렬 오프셋 (비율)
 extern RemoteState              g_remote;
 extern std::atomic<CFRunLoopRef> g_run_loop;
 extern std::atomic<bool>        g_taps_active;
@@ -184,11 +185,13 @@ static CGPoint return_point() {
     return CGPointMake(g_layout.trigger_edge - offset, g_remote.return_y);
 }
 
-/// 클라이언트가 보낸 복귀 비율(0~1)을 host 화면 좌표로 변환해 return_x/return_y 에 저장한다.
+/// 클라이언트가 보낸 복귀 비율(0~1, client 화면 기준)을 host 화면 좌표로 변환해
+/// return_x/return_y 에 저장한다.
 /// 진입했던 경계 모니터(entry_display) 기준으로 역변환해 진입/복귀 축을 일치시킨다.
 /// RIGHT/LEFT 진입은 세로 비율 → return_y, TOP/BOTTOM 진입은 가로 비율 → return_x.
 static void set_return_from_ratio(double ratio) {
-    ratio = std::clamp(ratio, 0.0, 1.0);
+    // 정렬 오프셋 역변환: 진입 시 host→client 로 -offset 했으므로 복귀는 +offset.
+    ratio = std::clamp(ratio + g_client_offset.load(std::memory_order_relaxed), 0.0, 1.0);
     const CGRect& d = g_remote.entry_display;
     switch (g_cfg.client_edge) {
     case TETHER_EDGE_RIGHT:
@@ -242,21 +245,27 @@ static void enter_remote(CGPoint loc) {
         break;
     }
 
+    // 정렬 오프셋 적용: client 화면이 host 보다 아래/오른쪽에 있으면(양수) host 의 같은
+    // 위치가 client 화면에서는 그만큼 위/왼쪽에 대응한다. client 로 보내는 비율과
+    // 가상 커서 초기화는 이 client 기준 비율을 쓴다 (복귀 시 역변환은 set_return_from_ratio).
+    double client_ratio = std::clamp(
+        ratio - g_client_offset.load(std::memory_order_relaxed), 0.0, 1.0);
+
     // 클라이언트 가상 커서 위치를 client_handle_sync 와 동일하게 초기화한다.
     // client 좌표계는 (0,0)~(width,height) 로 가정 (client 는 화면 원점 기준으로 clamp).
     double cw = (double)g_client_width.load(std::memory_order_relaxed);
     double ch = (double)g_client_height.load(std::memory_order_relaxed);
     switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  g_remote.client_x = 2.0;      g_remote.client_y = ratio * ch; break;
-    case TETHER_EDGE_LEFT:   g_remote.client_x = cw - 2.0; g_remote.client_y = ratio * ch; break;
-    case TETHER_EDGE_BOTTOM: g_remote.client_x = ratio * cw; g_remote.client_y = 2.0;      break;
-    case TETHER_EDGE_TOP:    g_remote.client_x = ratio * cw; g_remote.client_y = ch - 2.0; break;
+    case TETHER_EDGE_RIGHT:  g_remote.client_x = 2.0;      g_remote.client_y = client_ratio * ch; break;
+    case TETHER_EDGE_LEFT:   g_remote.client_x = cw - 2.0; g_remote.client_y = client_ratio * ch; break;
+    case TETHER_EDGE_BOTTOM: g_remote.client_x = client_ratio * cw; g_remote.client_y = 2.0;      break;
+    case TETHER_EDGE_TOP:    g_remote.client_x = client_ratio * cw; g_remote.client_y = ch - 2.0; break;
     }
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SYNC_CURSOR;
     pkt.dx = static_cast<int16_t>(g_cfg.client_edge);
-    pkt.dy = static_cast<int16_t>(ratio * 32767.0);
+    pkt.dy = static_cast<int16_t>(client_ratio * 32767.0);
     // 상태 전환 신호는 유실 시 양측 커서 상태가 어긋나므로 3회 연속 전송해 방어한다.
     // (지속 유실·엣지케이스는 PONG 의 active 비트 자가교정이 백업)
     for (int i = 0; i < 3; ++i) g_engine->send_mouse(pkt);

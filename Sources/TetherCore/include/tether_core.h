@@ -30,6 +30,10 @@ typedef struct {
     char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
     uint16_t  reconnect_interval_s; // client: PING/HELLO 재전송 간격(초), 0이면 기본값(5초)
     bool      predict_leave; // host: 자체 복귀 예측 사용 여부 (false면 LeavePacket 안전망만)
+    // host: client 화면 정렬 오프셋 (-1.0 ~ +1.0, client 화면 크기 대비 비율).
+    // 경계와 평행한 축 기준으로 client 화면이 host 보다 아래/오른쪽에 있으면 양수.
+    // 해상도 차이 등으로 전환 위치가 어긋날 때 미세조정한다.
+    double    client_offset;
 } TetherConfig;
 
 #ifndef TETHER_LOG_LEVEL_DEFINED
@@ -90,6 +94,14 @@ void tether_set_client_edge(TetherEdge edge);
 // host 자체 복귀 예측 사용 여부를 실시간으로 변경한다 (host 모드 전용).
 // 끄면 client 의 LeavePacket 안전망으로만 복귀한다(왕복 지연 있음, 오탐 없음).
 void tether_set_predict_leave(bool enabled);
+
+// client 화면 정렬 오프셋을 실시간으로 변경한다 (host 모드 전용).
+// 범위 밖 값은 -1.0 ~ +1.0 으로 clamp 되며, 다음 진입/복귀부터 즉시 반영된다.
+void tether_set_client_offset(double offset);
+
+// host: 연결된 client 의 화면 크기를 조회한다 (설정 UI 의 배치 시각화용).
+// client 가 ClientInfoPacket 을 보내기 전(미연결 포함)이면 false 를 반환한다.
+bool tether_get_client_size(int32_t* width, int32_t* height);
 
 // Cmd+Shift+Esc 감지 시 호출될 콜백 등록 (host 모드 전용).
 // cb 는 CGEventTap RunLoop 스레드에서 호출되므로 내부에서 비동기 처리해야 한다.

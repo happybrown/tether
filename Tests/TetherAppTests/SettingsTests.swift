@@ -75,6 +75,23 @@ final class TetherConfigBridgingTests: XCTestCase {
         XCTAssertEqual(config.port, 24900)
     }
 
+    func test_clientSize_unknownBeforeConnection() {
+        // ClientInfoPacket 수신 전(미실행 포함)에는 false — UI 가 "미상"으로 표시하는 근거
+        var w: Int32 = -1, h: Int32 = -1
+        XCTAssertFalse(tether_get_client_size(&w, &h))
+    }
+
+    func test_clientOffset_defaultsToZeroAndAssigns() {
+        var config = TetherConfig()
+        // 미설정 시 0 (오프셋 없음 = 기존 동작)
+        XCTAssertEqual(config.client_offset, 0)
+        config.client_offset = -0.25
+        XCTAssertEqual(config.client_offset, -0.25)
+        // 실행 전 호출해도 안전해야 한다 (IDLE 상태에선 값만 보관)
+        tether_set_client_offset(0.5)
+        tether_set_client_offset(0)
+    }
+
     func test_isHost_flag() {
         var hostConfig = TetherConfig()
         hostConfig.is_host = true

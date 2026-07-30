@@ -14,6 +14,8 @@ class TetherManager: ObservableObject {
     @Published var connectedHostname: String = ""
     @Published var authFailed: Bool = false
     @Published var hasAccessibilityPermission: Bool = false
+    // 연결된 client 의 화면 해상도 (host 모드, 미수신이면 nil). 배치 UI 시각화용.
+    @Published var clientScreenSize: CGSize?
 
     private var permissionTimer: Timer?
     private var clipboardTimer: Timer?
@@ -60,9 +62,23 @@ class TetherManager: ObservableObject {
 
     /// 사용자가 시스템 설정에서 허용을 체크했는지 5초 간격으로 polling.
     /// 허용되면 자동으로 UI 가 갱신되어 별도 조작이 필요 없다.
+    /// client 해상도도 함께 갱신한다 (연결 중 디스플레이 변경 반영, 콜백 없이 폴링으로 충분).
     private func startPermissionPolling() {
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshAccessibilityPermission() }
+            Task { @MainActor in
+                self?.refreshAccessibilityPermission()
+                self?.refreshClientScreenSize()
+            }
+        }
+    }
+
+    /// C 코어에서 client 화면 크기를 읽어 UI 상태로 반영한다 (host 전용, 미수신이면 nil).
+    func refreshClientScreenSize() {
+        var w: Int32 = 0, h: Int32 = 0
+        if tether_get_client_size(&w, &h), w > 0, h > 0 {
+            clientScreenSize = CGSize(width: CGFloat(w), height: CGFloat(h))
+        } else {
+            clientScreenSize = nil
         }
     }
 
@@ -111,6 +127,7 @@ class TetherManager: ObservableObject {
 
         config.reconnect_interval_s = UInt16(settings.reconnectInterval)
         config.predict_leave = settings.predictLeave
+        config.client_offset = settings.clientOffset
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         tether_start(&config, { status, msg, ctx in
@@ -120,6 +137,7 @@ class TetherManager: ObservableObject {
             DispatchQueue.main.async {
                 manager.status = status
                 manager.statusMessage = message
+                manager.refreshClientScreenSize()
                 if status == TETHER_STATUS_CONNECTED && !message.isEmpty
                     && message != "연결됨" && message != "재연결 중..." {
                     // host: message에 클라이언트 호스트명이 담겨 있음
@@ -148,6 +166,11 @@ class TetherManager: ObservableObject {
     /// 원격 복귀 예측 on/off 를 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
     func updatePredictLeave(_ enabled: Bool) {
         tether_set_predict_leave(enabled)
+    }
+
+    /// client 화면 정렬 오프셋을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
+    func updateClientOffset(_ offset: Double) {
+        tether_set_client_offset(offset)
     }
 
     // MARK: - 네트워크 성능 측정

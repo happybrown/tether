@@ -56,6 +56,11 @@ class AppSettings: ObservableObject {
     @Published var predictLeave: Bool {
         didSet { save() }
     }
+    // client 화면 정렬 오프셋 (-1.0 ~ +1.0, client 화면 크기 대비 비율).
+    // 해상도 차이로 전환 위치가 어긋날 때 경계 축 방향 미세조정에 쓴다.
+    @Published var clientOffset: Double {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -70,6 +75,7 @@ class AppSettings: ObservableObject {
         reconnectInterval  = defaults.integer(forKey: "reconnectInterval").nonZero ?? 5
         // 기본값 false. bool(forKey:)는 미설정 시 false 라 키 존재 여부로 판단한다.
         predictLeave       = defaults.object(forKey: "predictLeave") as? Bool ?? false
+        clientOffset       = defaults.object(forKey: "clientOffset") as? Double ?? 0
     }
 
     private func save() {
@@ -82,6 +88,7 @@ class AppSettings: ObservableObject {
         defaults.set(reconnectInterval, forKey: "reconnectInterval")
         defaults.set(psk, forKey: "psk")
         defaults.set(predictLeave, forKey: "predictLeave")
+        defaults.set(clientOffset, forKey: "clientOffset")
     }
 }
 
