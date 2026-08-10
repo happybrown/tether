@@ -276,6 +276,20 @@ void client_handle_move(const MousePacket& pkt) {
     }
 }
 
+// modifier keycode → 대응하는 CGEventFlags 마스크. modifier 가 아니면 0.
+// 좌/우 키가 같은 마스크를 공유한다 (예: 좌 Ctrl 59, 우 Ctrl 62).
+static CGEventFlags mask_for_modifier(CGKeyCode kc) {
+    switch (kc) {
+    case 59: case 62: return kCGEventFlagMaskControl;
+    case 56: case 60: return kCGEventFlagMaskShift;
+    case 58: case 61: return kCGEventFlagMaskAlternate;
+    case 55: case 54: return kCGEventFlagMaskCommand;
+    case 57:          return kCGEventFlagMaskAlphaShift; // CapsLock
+    case 63:          return kCGEventFlagMaskSecondaryFn;
+    default:          return 0;
+    }
+}
+
 // 원격 복귀 시 client 에 고착됐을 수 있는 modifier 를 전부 해제한다.
 // 각 modifier 키에 keyUp 을 주입하고, flags 를 0 으로 밀어 잔여 상태를 지운다.
 static void client_reset_modifiers() {
@@ -296,10 +310,19 @@ void client_handle_key(const KeyPacket& pkt) {
         return;
     }
     client_wake_display();
-    bool key_down = (pkt.event_type == EVENT_KEY_DOWN);
-    // EVENT_FLAGS_CHANGE는 keyDown=false로 전달해야 modifier 키 상태가 정상 반영된다.
-    CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode,
-                        pkt.event_type == EVENT_FLAGS_CHANGE ? false : key_down);
+
+    // flagsChanged 는 그 자체로 down/up 구분이 없다. 해당 modifier 의 flag 가
+    // 아직 켜져 있으면 눌린 것, 꺼졌으면 뗀 것으로 판정한다.
+    // (무조건 up 으로 주입하면 HID 상태와 flags 가 어긋나 Ctrl 등이 눌린 것처럼 고착된다.)
+    bool key_down;
+    if (pkt.event_type == EVENT_FLAGS_CHANGE) {
+        CGEventFlags m = mask_for_modifier(pkt.keycode);
+        key_down = m != 0 && ((CGEventFlags)pkt.flags & m) != 0;
+    } else {
+        key_down = (pkt.event_type == EVENT_KEY_DOWN);
+    }
+
+    CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode, key_down);
     CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
     CGEventPost(kCGHIDEventTap, ev);
     CFRelease(ev);

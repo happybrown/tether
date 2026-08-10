@@ -230,6 +230,45 @@ static void set_return_from_ratio(double ratio) {
     }
 }
 
+/// 원격 진입 시점에 host 에서 이미 눌려 있던 modifier 를 client 에 재생한다.
+///
+/// keyboard_callback 은 원격이 아닐 때 이벤트를 로컬로 흘려보내므로, Ctrl 을 누른 채
+/// 경계를 넘으면 client 는 그 down 을 받지 못한 채 이후 키의 flags 에만 Ctrl 이 실린다.
+/// 그 결과 "누르지 않은 Ctrl 이 눌린 것처럼" 동작하므로, 진입 때 실제 상태를 맞춰준다.
+static void sync_modifiers_on_enter() {
+    // 진입 전 잔여 상태를 먼저 지워 양쪽 기준점을 0 으로 맞춘다.
+    KeyPacket reset{};
+    reset.event_type = EVENT_RESET_MODIFIERS;
+    for (int i = 0; i < 3; ++i) g_engine->send_key(reset);
+
+    CGEventFlags state = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+
+    // 실제 눌려 있는 modifier 만 down 으로 재생한다. flags 는 누적해서 실어
+    // 실제 flagsChanged 이벤트 열과 같은 형태가 되게 한다.
+    static const struct { CGEventFlags mask; CGKeyCode kc; } kMods[] = {
+        { kCGEventFlagMaskControl,   59 },
+        { kCGEventFlagMaskShift,     56 },
+        { kCGEventFlagMaskAlternate, 58 },
+        { kCGEventFlagMaskCommand,   55 },
+    };
+
+    CGEventFlags acc = 0;
+    for (const auto& m : kMods) {
+        if (!(state & m.mask)) continue;
+        acc |= m.mask;
+        KeyPacket kp{};
+        kp.keycode    = m.kc;
+        kp.flags      = static_cast<uint32_t>(acc);
+        kp.event_type = EVENT_FLAGS_CHANGE;
+        for (int i = 0; i < 2; ++i) g_engine->send_key(kp);
+    }
+
+    if (acc) {
+        TETHER_INFO(CAT_EVENT, "[호스트] 진입 시 modifier 동기화: flags=0x%llx",
+                    (unsigned long long)acc);
+    }
+}
+
 static void enter_remote(CGPoint loc) {
     // peer가 연결되어 있지 않으면 원격 모드 진입을 차단한다.
     // 연결 끊김 상태에서 경계 진입 시 먹통 방지.
@@ -294,6 +333,9 @@ static void enter_remote(CGPoint loc) {
     // 상태 전환 신호는 유실 시 양측 커서 상태가 어긋나므로 3회 연속 전송해 방어한다.
     // (지속 유실·엣지케이스는 PONG 의 active 비트 자가교정이 백업)
     for (int i = 0; i < 3; ++i) g_engine->send_mouse(pkt);
+
+    // SYNC_CURSOR 뒤에 보낸다 — client 의 키 처리 가드(pos_init)가 먼저 열려야 한다.
+    sync_modifiers_on_enter();
 
     TETHER_INFO(CAT_CURSOR,
         "[호스트] 원격 모드 진입: edge=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f)",
