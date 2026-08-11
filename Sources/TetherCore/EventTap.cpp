@@ -172,6 +172,22 @@ static bool    g_last_local_valid = false;
 /// 데스크톱 전체 경계 기준으로 밀어낸다. 기준 화면이 데스크톱 내부일 때
 /// trigger_edge 로 밀면 옆 디스플레이 안이라 커서가 그대로 보이므로,
 /// 항상 전체 영역(left/right/top/bottom) 바깥을 쓴다.
+/// macOS 는 커서 warp 후 기본 ~250ms 동안 하드웨어 이벤트를 억제한다(local events
+/// suppression). 이 억제는 원격 모드에는 필수다 — offscreen 주차 커서가 물리 이동으로
+/// 화면 안에 되돌아오는 것과, warp 변위가 다음 이벤트 delta 에 오염되는 것을 막아준다
+/// (전역으로 0 을 주면 주차 warp 변위가 delta 에 섞여 client 커서가 아래로 폭주한다).
+/// 반대로 복귀 warp 직후에는 이 억제가 커서를 경계에 ~250ms 멈춰 세우는 끊김의 원인
+/// 이므로, 복귀 순간에만 0 으로 낮추고 진입 시 기본값으로 되돌린다.
+/// 10.6부터 deprecated 지만 여전히 동작하며, 대체 API(CGEventSource 기반)는 합성
+/// 이벤트 post 에만 적용되고 warp 에는 효과가 없어 이 함수가 유일한 수단이다.
+static void set_events_suppression_interval(CFTimeInterval seconds) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    CGSetLocalEventsSuppressionInterval(seconds);
+#pragma clang diagnostic pop
+}
+static const CFTimeInterval kDefaultSuppressionInterval = 0.25;
+
 static CGPoint offscreen_point() {
     switch (g_cfg.client_edge) {
     case TETHER_EDGE_RIGHT:  return CGPointMake(g_layout.right(),          99999.0);
@@ -287,6 +303,10 @@ static void enter_remote(CGPoint loc) {
     g_remote.entry_guard = 10;
     g_remote.active.store(true, std::memory_order_release);
 
+    // 원격 중 offscreen 주차가 안정되도록 suppression 을 기본값으로 복원한다.
+    // (직전 복귀에서 0 으로 낮췄던 것을 되돌림 — 주차 warp 보다 먼저 실행해야 한다)
+    set_events_suppression_interval(kDefaultSuppressionInterval);
+
     tether_hide_cursor();
     CGAssociateMouseAndMouseCursorPosition(false);
     CGWarpMouseCursorPosition(offscreen_point());
@@ -347,6 +367,11 @@ static void enter_remote(CGPoint loc) {
 static void leave_remote() {
     CGPoint rp = return_point();
     TETHER_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)", rp.x, rp.y);
+
+    // 복귀 warp 직후의 suppression(~250ms)이 커서를 경계에 멈춰 세우지 않도록
+    // 복귀 순간에만 0 으로 낮춘다 (빠른 복귀 시 유실 거리가 커져 끊김이 뚜렷해진다).
+    // 다음 enter_remote 가 기본값으로 복원한다.
+    set_events_suppression_interval(0.0);
 
     // 커서 복귀 + 연동 복구를 active=false 보다 먼저 수행한다.
     // CGWarp/CGAssociate 는 비동기 Mach 메시지라 실제 반영까지 수십ms 지연이 있다.
