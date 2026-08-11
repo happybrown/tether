@@ -68,8 +68,8 @@ mkdir -p bin
 
 # 빌드마다 버전 patch 자리(x.y.Z)를 자동 증가시킨다.
 # project.yml 의 MARKETING_VERSION 이 버전 단일 소스이며, Info.plist 는 이를 변수로 참조한다.
-# TETHER_NO_VERSION_BUMP=1 이면 증가를 건너뛴다 — deploy.sh 가 원격(iMac) 빌드 시 사용해
-# 로컬이 이미 올린 버전을 그대로 유지(양쪽 이중 증가 방지).
+# TETHER_NO_VERSION_BUMP=1 이면 증가를 건너뛴다 — 두 대에 같은 버전을 배포할 때
+# 두 번째 머신에서 사용해 이중 증가를 막는다.
 PROJECT_YML="project.yml"
 CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
 if [ -n "$TETHER_NO_VERSION_BUMP" ]; then
@@ -112,8 +112,7 @@ cp -R "build/Build/Products/$CONFIG/Tether.app" bin/Tether.app
 xattr -cr bin/Tether.app
 
 # 참고: SSH(비대화형) 세션에서 login keychain 이 잠겨 있으면 codesign 이 개인키에 접근 못 해
-# adhoc 으로 떨어진다. 원격(iMac) 빌드 시의 keychain unlock 은 deploy.sh 가 책임진다
-# (로컬 keychain 에 저장한 iMac 암호를 SSH 세션에서 unlock). 여기서는 순수 빌드만 한다.
+# adhoc 으로 떨어진다. 원격 빌드 시에는 미리 `security unlock-keychain` 이 필요하다.
 
 # 개발용 인증서(tether-dev)가 있으면 그걸로 서명한다.
 # 인증서 기반 서명은 재빌드해도 코드 해시가 아닌 서명 주체로 TCC가 앱을 식별하므로

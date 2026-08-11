@@ -3,3 +3,8 @@ bin/
 build/
 # xcodeproj 전체는 xcodegen 생성물 (build.sh clean 이 지우고 매 빌드 재생성)
 *.xcodeproj/
+
+# 개인 배포 환경에 특화된 스크립트 (원격 호스트/경로 포함)
+deploy.sh
+
+.DS_Store

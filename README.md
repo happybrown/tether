@@ -34,18 +34,16 @@ open bin/Tether.app
 
 메뉴 바에 아이콘이 생기며 백그라운드로 동작한다(Dock 아이콘 없음).
 
-## 두 대 동시 배포 (deploy.sh)
+## 두 대에 설치하기
 
-로컬 Mac과 원격 Mac을 명령 하나로 빌드·재실행한다.
+Host와 Client 양쪽 Mac에 각각 설치해야 한다. 아키텍처가 달라도(arm64 / x86_64)
+각 머신에서 빌드하면 된다.
 
 ```bash
-bash deploy.sh              # 로컬 빌드 → 원격 소스 동기화 → 원격 빌드 → 양쪽 재실행
-bash deploy.sh --local      # 로컬만
-bash deploy.sh --no-restart # 빌드·동기화만, 재실행 생략
+bash build.sh              # 각 Mac에서 실행
+bash make_dmg.sh           # dmg 패키징 (선택)
+bash install_app.sh <dmg>  # /Applications 에 설치
 ```
-
-- 아키텍처가 달라도(arm64 / x86_64) 각 머신에서 각자 빌드한다.
-- 원격 주소 등은 환경변수로 지정: `IMAC_HOST`, `IMAC_PATH`, `IMAC_BREW`.
 
 ## 설정
 
@@ -84,7 +82,6 @@ bash deploy.sh --no-restart # 빌드·동기화만, 재실행 생략
 ```
 tether/
 ├── build.sh                 빌드 (버전 자동 증가, 서명)
-├── deploy.sh                두 대 동시 빌드·배포
 ├── test.sh                  테스트
 ├── project.yml              xcodegen 설정 (버전 단일 소스)
 └── Sources/
@@ -93,3 +90,7 @@ tether/
 ```
 
 자세한 아키텍처는 [CLAUDE.md](CLAUDE.md) 참고.
+
+## 라이선스
+
+[MIT](LICENSE) © Myeongjin Cho
