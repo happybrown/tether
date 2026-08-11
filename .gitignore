@@ -11,3 +11,6 @@ deploy.sh
 
 # 개인 IDE 설정
 .vscode/
+
+# AI 어시스턴트 작업 지침 (로컬 전용)
+CLAUDE.md

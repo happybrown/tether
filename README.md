@@ -89,7 +89,7 @@ tether/
     └── TetherApp/            Swift UI (메뉴 바, 설정 화면)
 ```
 
-자세한 아키텍처는 [CLAUDE.md](CLAUDE.md) 참고.
+자세한 아키텍처는 [ARCHITECTURE.md](ARCHITECTURE.md) 참고.
 
 ## 라이선스
 
