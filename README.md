@@ -1,96 +1,101 @@
-# tether
+# Tether
 
-두 Mac 사이에서 마우스·키보드를 공유하는 메뉴 바 앱.
-화면 경계로 커서를 밀면 다른 Mac으로 제어가 넘어가고, 반대 방향으로 밀면 돌아온다.
+**English** | [한국어](README.ko.md)
 
-## 요구사항
+A menu bar app that shares one mouse and keyboard between two Macs.
+Push the cursor past a screen edge and control moves to the other Mac; push
+back the other way and it returns.
 
-- macOS 13 이상
+## Requirements
+
+- macOS 13 or later
 - Xcode + [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- **손쉬운 사용(Accessibility) 권한** — Host·Client **양쪽 모두** 필요
-  - Host: 키보드·마우스 이벤트 캡처(Event Tap)
-  - Client: 원격 클릭·키 입력 주입(Event Post)
-  - 시스템 설정 → 개인 정보 보호 및 보안 → 손쉬운 사용 → Tether 허용
+- **Accessibility permission** — required on **both** the host and the client
+  - Host: capturing keyboard and mouse events (Event Tap)
+  - Client: injecting remote clicks and keystrokes (Event Post)
+  - System Settings → Privacy & Security → Accessibility → allow Tether
 
-## 빌드
+## Build
 
 ```bash
-bash build.sh          # 결과물: ./bin/Tether.app
-bash build.sh clean    # 빌드 산출물 정리
-bash build.sh cert     # 개발용 서명 인증서(tether-dev) 생성 (1회)
+bash build.sh          # output: ./bin/Tether.app
+bash build.sh clean    # clean build artifacts
+bash build.sh cert     # create the tether-dev signing certificate (once)
 ```
 
-빌드마다 버전 patch 자리(`x.y.Z`)가 자동 증가한다. 버전은 `project.yml`의
-`MARKETING_VERSION`이 단일 소스이며, 앱의 메뉴 바 헤더와 설정 창에 표시된다.
+Every build bumps the patch component (`x.y.Z`). `MARKETING_VERSION` in
+`project.yml` is the single source of truth, and the version is shown in the
+menu bar header and the settings window.
 
-> `tether-dev` 인증서로 서명하면 재빌드해도 손쉬운 사용 권한이 유지된다.
-> 인증서가 없으면 adhoc으로 서명되어 재빌드마다 권한을 다시 허용해야 한다.
+> Signing with the `tether-dev` certificate keeps accessibility permission
+> across rebuilds. Without a certificate the app is signed adhoc, and you have
+> to grant permission again after every build.
 
-## 실행
+## Run
 
 ```bash
 open bin/Tether.app
 ```
 
-메뉴 바에 아이콘이 생기며 백그라운드로 동작한다(Dock 아이콘 없음).
+An icon appears in the menu bar and the app runs in the background (no Dock icon).
 
-## 두 대에 설치하기
+## Installing on both Macs
 
-Host와 Client 양쪽 Mac에 각각 설치해야 한다. 아키텍처가 달라도(arm64 / x86_64)
-각 머신에서 빌드하면 된다.
+Install on the host and the client separately. The architectures can differ
+(arm64 / x86_64) — just build on each machine.
 
 ```bash
-bash build.sh              # 각 Mac에서 실행
-bash make_dmg.sh           # dmg 패키징 (선택)
-bash install_app.sh <dmg>  # /Applications 에 설치
+bash build.sh              # run on each Mac
+bash make_dmg.sh           # package as dmg (optional)
+bash install_app.sh <dmg>  # install into /Applications
 ```
 
-## 설정
+## Settings
 
-메뉴 바 아이콘 클릭 → **설정...** (⌘,)
+Click the menu bar icon → **Settings...** (⌘,)
 
-| 항목 | 설명 |
-|------|------|
-| 실행 모드 | **Host** — 입력을 보내는 쪽 / **Client** — 받는 쪽 |
-| Client 위치 | Host 기준 Client 방향 (오른쪽 / 왼쪽 / 위쪽 / 아래쪽), 실행 중 변경 가능 |
-| Host IP | Client 모드에서 접속할 Host의 IP |
-| 포트 | 기본값 24900 |
-| 공유 암호(PSK) | 설정 시 HMAC 인증. 비우면 인증 없음. **양쪽 동일하게** 입력 |
-| 연결 확인 간격 | Client의 PING 주기 (연결 유지·재연결) |
-| 로그인 시 자동 실행 / 자동 연결 | 로그인 후 앱·세션 자동 시작 |
+| Item | Description |
+|------|-------------|
+| Mode | **Host** — sends input / **Client** — receives it |
+| Client position | Where the client sits relative to the host (right / left / top / bottom); changeable while running |
+| Host IP | The host's IP, used in client mode |
+| Port | Defaults to 24900 |
+| Shared secret (PSK) | Enables HMAC authentication. Leave empty for no auth. Must **match on both sides** |
+| Connection check interval | The client's PING interval (keepalive and reconnect) |
+| Launch at login / auto-connect | Start the app and the session automatically after login |
 
-## 사용 방법
+## Usage
 
-1. **Host** 쪽: 모드 `Host` → 시작
-2. **Client** 쪽: 모드 `Client` → Host IP 입력 → 시작
-3. Host에서 커서를 설정 방향 경계까지 밀면 Client로 전환
-4. Client 화면에서 반대 방향 경계까지 밀면 Host로 복귀
+1. On the **host**: set mode to `Host` → Start
+2. On the **client**: set mode to `Client` → enter the host IP → Start
+3. On the host, push the cursor to the configured edge to switch to the client
+4. On the client screen, push to the opposite edge to return to the host
 
-### 단축키 (Host)
+### Shortcuts (host)
 
-- **Ctrl+Opt+Cmd+Esc** — 원격 모드에서 로컬로 강제 복귀
-- **Cmd+Shift+Esc** — 세션 강제 중지 (완전 먹통 시)
+- **Ctrl+Opt+Cmd+Esc** — force a return to local from remote mode
+- **Cmd+Shift+Esc** — force the session to stop (if input is fully stuck)
 
-## 공유 대상
+## What is shared
 
-- 마우스 이동 / 클릭 (좌·우·휠 클릭) / 스크롤
-- 키보드 (modifier 키 포함)
-- 클립보드 텍스트 (양방향)
+- Mouse movement, clicks (left / right / middle), and scrolling
+- Keyboard, including modifier keys
+- Clipboard text and images, in both directions
 
-## 프로젝트 구조
+## Project layout
 
 ```
 tether/
-├── build.sh                 빌드 (버전 자동 증가, 서명)
-├── test.sh                  테스트
-├── project.yml              xcodegen 설정 (버전 단일 소스)
+├── build.sh                 build (auto version bump, signing)
+├── test.sh                  tests
+├── project.yml              xcodegen config (single source for the version)
 └── Sources/
-    ├── TetherCore/           C++ 코어 (이벤트 캡처·주입, UDP 통신, 인증)
-    └── TetherApp/            Swift UI (메뉴 바, 설정 화면)
+    ├── TetherCore/          C++ core (event capture/injection, UDP, auth)
+    └── TetherApp/           Swift UI (menu bar, settings)
 ```
 
-자세한 아키텍처는 [ARCHITECTURE.md](ARCHITECTURE.md) 참고.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed design.
 
-## 라이선스
+## License
 
 [MIT](LICENSE) © Myeongjin Cho
