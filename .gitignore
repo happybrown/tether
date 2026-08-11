@@ -8,3 +8,6 @@ build/
 deploy.sh
 
 .DS_Store
+
+# 개인 IDE 설정
+.vscode/
