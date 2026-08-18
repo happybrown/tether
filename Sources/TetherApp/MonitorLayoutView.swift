@@ -160,41 +160,53 @@ struct MonitorLayoutView: View {
     private static let canvasSpace = "monitorLayoutCanvas"
 
     private func dragGesture(_ m: Metrics) -> some Gesture {
+        // 클로저 본문은 applyDrag 로 분리한다. 본문을 인라인으로 두면 타입 추론이
+        // 무거워져 일부 Swift 버전에서 "type of expression is ambiguous" 로 실패한다.
         DragGesture(minimumDistance: 2, coordinateSpace: .named(Self.canvasSpace))
-            .onChanged { v in
-                let p = v.location
-
-                // 1) 기준 화면 + 방향: 포인터에서 각 화면의 네 변까지 거리를 재고
-                //    가장 가까운 (화면, 변) 조합을 고른다. 화면 크기가 달라도 공정하게
-                //    비교되도록 픽셀 거리를 그대로 쓴다.
-                var best: (uuid: String, edge: ClientEdge, dist: CGFloat)?
-                for h in m.hosts {
-                    for e in ClientEdge.allCases {
-                        let d = distance(from: p, toEdge: e, of: h.rect)
-                        if best == nil || d < best!.dist {
-                            best = (h.display.uuid, e, d)
-                        }
-                    }
-                }
-                guard let pick = best,
-                      let anchor = m.hosts.first(where: { $0.display.uuid == pick.uuid })?.rect
-                else { return }
-
-                if triggerUUID != pick.uuid { triggerUUID = pick.uuid }
-                if edge != pick.edge { edge = pick.edge }
-
-                // 2) 오프셋: 경계 평행 축에서 기준 화면 중앙과의 거리를 client 크기 비율로.
-                let raw: Double
-                switch pick.edge {
-                case .left, .right:
-                    raw = (p.y - anchor.midY) / m.clientBox.height
-                case .top, .bottom:
-                    raw = (p.x - anchor.midX) / m.clientBox.width
-                }
-                var snapped = (max(-1.0, min(1.0, raw)) * 100).rounded() / 100
-                if abs(snapped) < 0.03 { snapped = 0 }   // 중앙 근처는 0 으로 스냅
-                if snapped != offset { offset = snapped }
+            .onChanged { (v: DragGesture.Value) in
+                applyDrag(at: v.location, m: m)
             }
+    }
+
+    /// 드래그 위치를 기준 화면·방향·오프셋으로 반영한다.
+    private func applyDrag(at p: CGPoint, m: Metrics) {
+        // 1) 기준 화면 + 방향: 포인터에서 각 화면의 네 변까지 거리를 재고
+        //    가장 가까운 (화면, 변) 조합을 고른다. 화면 크기가 달라도 공정하게
+        //    비교되도록 픽셀 거리를 그대로 쓴다.
+        var bestUUID: String = ""
+        var bestEdge: ClientEdge = .right
+        var bestDist: CGFloat = .greatestFiniteMagnitude
+        var found = false
+        for h in m.hosts {
+            let rect: CGRect = h.rect
+            for e in ClientEdge.allCases {
+                let d: CGFloat = distance(from: p, toEdge: e, of: rect)
+                if d < bestDist {
+                    bestDist = d
+                    bestUUID = h.display.uuid
+                    bestEdge = e
+                    found = true
+                }
+            }
+        }
+        guard found,
+              let anchor = m.hosts.first(where: { $0.display.uuid == bestUUID })?.rect
+        else { return }
+
+        if triggerUUID != bestUUID { triggerUUID = bestUUID }
+        if edge != bestEdge { edge = bestEdge }
+
+        // 2) 오프셋: 경계 평행 축에서 기준 화면 중앙과의 거리를 client 크기 비율로.
+        let raw: Double
+        switch bestEdge {
+        case .left, .right:
+            raw = Double(p.y - anchor.midY) / Double(m.clientBox.height)
+        case .top, .bottom:
+            raw = Double(p.x - anchor.midX) / Double(m.clientBox.width)
+        }
+        var snapped: Double = (max(-1.0, min(1.0, raw)) * 100).rounded() / 100
+        if abs(snapped) < 0.03 { snapped = 0 }   // 중앙 근처는 0 으로 스냅
+        if snapped != offset { offset = snapped }
     }
 
     /// 점 p 에서 사각형 r 의 특정 변까지의 거리. 변을 선분으로 보고 최단거리를 구한다.
