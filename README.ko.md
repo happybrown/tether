@@ -22,8 +22,8 @@ bash build.sh clean    # 빌드 산출물 정리
 bash build.sh cert     # 개발용 서명 인증서(tether-dev) 생성 (1회)
 ```
 
-빌드마다 버전 patch 자리(`x.y.Z`)가 자동 증가한다. 버전은 `project.yml`의
-`MARKETING_VERSION`이 단일 소스이며, 앱의 메뉴 바 헤더와 설정 창에 표시된다.
+버전은 `project.yml`의 `MARKETING_VERSION`이 단일 소스이며, 앱의 메뉴 바 헤더와
+설정 창에 표시된다. 빌드는 버전을 바꾸지 않는다 — 릴리스 시 태그에서 설정된다(아래 참고).
 
 > `tether-dev` 인증서로 서명하면 재빌드해도 손쉬운 사용 권한이 유지된다.
 > 인증서가 없으면 adhoc으로 서명되어 재빌드마다 권한을 다시 허용해야 한다.
@@ -46,6 +46,18 @@ bash build.sh              # 각 Mac에서 실행
 bash make_dmg.sh           # dmg 패키징 (선택)
 bash install_app.sh <dmg>  # /Applications 에 설치
 ```
+
+## 릴리스
+
+버전은 태그로 관리한다. `v*` 태그를 푸시하면 dmg 를 빌드해 GitHub 릴리스로 배포한다:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+워크플로가 빌드 전에 태그 버전을 `project.yml` 에 반영하므로, 앱 번들과 dmg
+파일명이 항상 태그와 일치한다.
 
 ## 설정
 

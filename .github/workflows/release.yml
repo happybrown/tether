@@ -32,13 +32,12 @@ jobs:
             exit 1
           fi
           sed -i '' -E "s/(MARKETING_VERSION: )\"[0-9.]+\"/\1\"$VERSION\"/" project.yml
+          # 빌드 번호는 릴리스마다 단조 증가해야 한다 (동일 버전 재릴리스 구분용).
+          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: )\"[0-9]+\"/\1\"${GITHUB_RUN_NUMBER}\"/" project.yml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "릴리스 버전: $VERSION"
+          echo "릴리스 버전: $VERSION (빌드 ${GITHUB_RUN_NUMBER})"
 
-      # 위에서 태그 버전을 박았으므로 build.sh 의 자동 증가를 반드시 막아야 한다.
       - name: Build (Release)
-        env:
-          TETHER_NO_VERSION_BUMP: 1
         run: bash build.sh
 
       - name: Verify built version matches tag

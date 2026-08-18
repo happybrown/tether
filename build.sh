@@ -66,26 +66,12 @@ fi
 
 mkdir -p bin
 
-# 빌드마다 버전 patch 자리(x.y.Z)를 자동 증가시킨다.
-# project.yml 의 MARKETING_VERSION 이 버전 단일 소스이며, Info.plist 는 이를 변수로 참조한다.
-# TETHER_NO_VERSION_BUMP=1 이면 증가를 건너뛴다 — 두 대에 같은 버전을 배포할 때
-# 두 번째 머신에서 사용해 이중 증가를 막는다.
+# 버전은 태그로 관리한다 — 빌드는 project.yml 의 값을 그대로 읽어 쓴다.
+# 릴리스는 v* 태그를 푸시하면 .github/workflows/release.yml 이 태그 버전을
+# project.yml 에 반영해 빌드하므로, 로컬 빌드가 버전을 건드릴 이유가 없다.
 PROJECT_YML="project.yml"
 CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
-if [ -n "$TETHER_NO_VERSION_BUMP" ]; then
-    echo "버전 증가 건너뜀 (TETHER_NO_VERSION_BUMP): $CUR_VER 유지"
-elif [ -n "$CUR_VER" ]; then
-    MAJOR=$(echo "$CUR_VER" | cut -d. -f1)
-    MINOR=$(echo "$CUR_VER" | cut -d. -f2)
-    PATCH=$(echo "$CUR_VER" | cut -d. -f3)
-    NEW_VER="$MAJOR.$MINOR.$((PATCH + 1))"
-    # CURRENT_PROJECT_VERSION(빌드 번호)도 함께 증가
-    CUR_BUILD=$(grep 'CURRENT_PROJECT_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+)".*/\1/')
-    NEW_BUILD=$((CUR_BUILD + 1))
-    sed -i '' -E "s/(MARKETING_VERSION: )\"[0-9.]+\"/\1\"$NEW_VER\"/" "$PROJECT_YML"
-    sed -i '' -E "s/(CURRENT_PROJECT_VERSION: )\"[0-9]+\"/\1\"$NEW_BUILD\"/" "$PROJECT_YML"
-    echo "버전: $CUR_VER → $NEW_VER (빌드 $NEW_BUILD)"
-fi
+echo "버전: ${CUR_VER:-unknown}"
 
 # 빌드 구성 선택. 기본 Release(성능 최적화 -O3, DEBUG 로그 제거).
 # `bash build.sh debug` → Debug(-O0, DEBUG 매크로 → TETHER_DEBUG 상세 로그 활성화).

@@ -23,9 +23,9 @@ bash build.sh clean    # clean build artifacts
 bash build.sh cert     # create the tether-dev signing certificate (once)
 ```
 
-Every build bumps the patch component (`x.y.Z`). `MARKETING_VERSION` in
-`project.yml` is the single source of truth, and the version is shown in the
-menu bar header and the settings window.
+`MARKETING_VERSION` in `project.yml` is the single source of truth for the
+version, and it is shown in the menu bar header and the settings window.
+Builds never change it — releases set it from the tag (see below).
 
 > Signing with the `tether-dev` certificate keeps accessibility permission
 > across rebuilds. Without a certificate the app is signed adhoc, and you have
@@ -49,6 +49,19 @@ bash build.sh              # run on each Mac
 bash make_dmg.sh           # package as dmg (optional)
 bash install_app.sh <dmg>  # install into /Applications
 ```
+
+## Releasing
+
+Versions are managed by tags. Pushing a `v*` tag builds a dmg and publishes it
+as a GitHub release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow writes the tag version into `project.yml` before building, so the
+app bundle and the dmg filename always match the tag.
 
 ## Settings
 

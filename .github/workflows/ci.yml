@@ -28,11 +28,8 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --quiet
 
-      # build.sh 는 실행마다 project.yml 의 버전을 올리므로 CI 에서는 증가를 막는다.
       # 서명은 tether-dev 인증서가 없는 러너에서 adhoc 으로 폴백된다(빌드 검증에는 충분).
       - name: Build (Release)
-        env:
-          TETHER_NO_VERSION_BUMP: 1
         run: bash build.sh
 
       # test.sh 는 grep 파이프와 `|| true` 로 실패를 삼켜 게이트로 쓸 수 없다.
