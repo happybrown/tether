@@ -1,0 +1,58 @@
+name: CI
+
+# PR 과 main 직접 푸시에서 빌드·테스트를 검증한다.
+# 이 워크플로의 job 이름(build)을 브랜치 보호의 required status check 로 지정하면
+# 빌드가 성공한 PR 만 main 에 머지할 수 있다.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 같은 PR 에 새 커밋이 올라오면 이전 실행은 취소해 러너 시간을 아낀다.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --quiet
+
+      # build.sh 는 실행마다 project.yml 의 버전을 올리므로 CI 에서는 증가를 막는다.
+      # 서명은 tether-dev 인증서가 없는 러너에서 adhoc 으로 폴백된다(빌드 검증에는 충분).
+      - name: Build (Release)
+        env:
+          TETHER_NO_VERSION_BUMP: 1
+        run: bash build.sh
+
+      # test.sh 는 grep 파이프와 `|| true` 로 실패를 삼켜 게이트로 쓸 수 없다.
+      # 종료 코드가 그대로 전달되도록 xcodebuild 를 직접 호출한다.
+      - name: Test TetherCoreTests
+        run: |
+          xcodebuild test \
+            -project TetherApp.xcodeproj \
+            -scheme TetherCoreTests \
+            -configuration Debug \
+            -derivedDataPath build \
+            -destination "platform=macOS" \
+            -quiet
+
+      - name: Test TetherAppTests
+        run: |
+          xcodebuild test \
+            -project TetherApp.xcodeproj \
+            -scheme TetherAppTests \
+            -configuration Debug \
+            -derivedDataPath build \
+            -destination "platform=macOS" \
+            -quiet

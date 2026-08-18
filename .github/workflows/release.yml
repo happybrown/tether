@@ -1,0 +1,73 @@
+name: Release
+
+# v* 태그를 푸시하면 해당 버전으로 dmg 를 만들어 릴리스에 첨부한다.
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 릴리스 생성 및 자산 업로드에 필요
+
+jobs:
+  release:
+    name: Build and publish dmg
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # 태그(v1.2.3)에서 버전을 뽑아 project.yml 에 반영한다.
+      # project.yml 이 버전 단일 소스이므로, 이렇게 해야 앱 번들과 dmg 파일명이
+      # 태그와 정확히 일치한다.
+      - name: Set version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "태그가 vX.Y.Z 형식이 아닙니다: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          sed -i '' -E "s/(MARKETING_VERSION: )\"[0-9.]+\"/\1\"$VERSION\"/" project.yml
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "릴리스 버전: $VERSION"
+
+      # 위에서 태그 버전을 박았으므로 build.sh 의 자동 증가를 반드시 막아야 한다.
+      - name: Build (Release)
+        env:
+          TETHER_NO_VERSION_BUMP: 1
+        run: bash build.sh
+
+      - name: Verify built version matches tag
+        run: |
+          BUILT=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' \
+                  bin/Tether.app/Contents/Info.plist)
+          if [ "$BUILT" != "${{ steps.version.outputs.version }}" ]; then
+            echo "버전 불일치: 앱=$BUILT, 태그=${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
+          echo "버전 일치 확인: $BUILT"
+
+      - name: Package dmg
+        id: dmg
+        run: |
+          DMG=$(bash make_dmg.sh | tail -1)
+          echo "path=$DMG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.dmg.outputs.path }}
+          generate_release_notes: true
+          body: |
+            ## 설치
+
+            1. `Tether-${{ steps.version.outputs.version }}.dmg` 를 내려받아 연다
+            2. Tether.app 을 Applications 로 끌어다 놓는다
+            3. 시스템 설정 → 개인 정보 보호 및 보안 → 손쉬운 사용에서 Tether 를 허용한다
+
+            > 이 빌드는 Apple Developer 인증서로 공증(notarize)되지 않았다.
+            > 처음 실행할 때 Gatekeeper 경고가 나오면 앱을 오른쪽 클릭 → 열기를 선택한다.
