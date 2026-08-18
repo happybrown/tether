@@ -204,8 +204,15 @@ struct MonitorLayoutView: View {
         case .top, .bottom:
             raw = Double(p.x - anchor.midX) / Double(m.clientBox.width)
         }
-        var snapped: Double = (max(-1.0, min(1.0, raw)) * 100).rounded() / 100
-        if abs(snapped) < 0.03 { snapped = 0 }   // 중앙 근처는 0 으로 스냅
+        // 각 단계의 타입을 명시한다. 리터럴과 abs/max/min 오버로드가 한 식에 겹치면
+        // 일부 Swift 버전이 타입을 못 풀고 "ambiguous" 로 실패한다.
+        let lower: Double = -1.0
+        let upper: Double = 1.0
+        let clamped: Double = min(upper, max(lower, raw))
+        var snapped: Double = (clamped * 100.0).rounded() / 100.0
+        let deadzone: Double = 0.03
+        let magnitude: Double = snapped < 0.0 ? -snapped : snapped
+        if magnitude < deadzone { snapped = 0.0 }   // 중앙 근처는 0 으로 스냅
         if snapped != offset { offset = snapped }
     }
 
@@ -221,7 +228,9 @@ struct MonitorLayoutView: View {
 
     /// v 가 [lo, hi] 밖이면 벗어난 거리, 안이면 0.
     private func clampGap(_ v: CGFloat, _ lo: CGFloat, _ hi: CGFloat) -> CGFloat {
-        v < lo ? lo - v : (v > hi ? v - hi : 0)
+        if v < lo { return lo - v }
+        if v > hi { return v - hi }
+        return 0
     }
 }
 
@@ -234,6 +243,26 @@ private struct MonitorBox: View {
     let selected: Bool
     /// 기준 화면 강조 — 어느 host 화면이 전환 기준인지 한눈에 보이게 한다.
     let highlighted: Bool
+
+    // 중첩 삼항으로 색을 고르면 타입 추론이 무거워져 일부 Swift 버전이 실패한다.
+    // 상태별 값을 미리 확정해 body 를 단순하게 유지한다.
+    private var fillColor: Color {
+        if selected { return tint.opacity(0.15) }
+        if highlighted { return Color.accentColor.opacity(0.08) }
+        return Color.primary.opacity(0.04)
+    }
+
+    private var strokeColor: Color {
+        if selected { return tint }
+        if highlighted { return Color.accentColor.opacity(0.55) }
+        return Color.primary.opacity(0.18)
+    }
+
+    private var strokeWidth: CGFloat {
+        if selected { return 2 }
+        if highlighted { return 1.5 }
+        return 1
+    }
 
     var body: some View {
         VStack(spacing: 2) {
@@ -250,17 +279,11 @@ private struct MonitorBox: View {
         .padding(2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? tint.opacity(0.15)
-                      : (highlighted ? Color.accentColor.opacity(0.08)
-                                     : Color.primary.opacity(0.04)))
+            RoundedRectangle(cornerRadius: 6).fill(fillColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(selected ? tint
-                        : (highlighted ? Color.accentColor.opacity(0.55)
-                                       : Color.primary.opacity(0.18)),
-                        lineWidth: selected ? 2 : (highlighted ? 1.5 : 1))
+                .stroke(strokeColor, lineWidth: strokeWidth)
         )
     }
 }
