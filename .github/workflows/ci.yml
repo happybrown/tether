@@ -17,17 +17,28 @@ concurrency:
 jobs:
   build:
     name: Build and test
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
 
+      # xcodegen 이 생성하는 프로젝트 포맷은 설치된 Xcode 버전을 따른다.
+      # 러너 기본값에 맡기면 생성 포맷이 빌드용 Xcode 보다 최신이라 열지 못하는
+      # 경우가 있어(objectVersion 불일치), 사용할 Xcode 를 명시적으로 고정한다.
+      - name: Select Xcode
+        run: |
+          # 설치된 Xcode 중 가장 최신을 고른다. 경로를 고정하면 러너 이미지가
+          # 바뀔 때 깨지므로, 실제 존재하는 것 중에서 선택한다.
+          APP=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "선택: $APP"
+          sudo xcode-select -s "$APP"
+          xcodebuild -version
+
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate --quiet
-
+      # build.sh 가 xcodegen generate 를 포함한다. 이어지는 테스트 스텝도
+      # 여기서 생성된 프로젝트를 쓴다.
       # 서명은 tether-dev 인증서가 없는 러너에서 adhoc 으로 폴백된다(빌드 검증에는 충분).
       - name: Build (Release)
         run: bash build.sh

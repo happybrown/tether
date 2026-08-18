@@ -12,10 +12,20 @@ permissions:
 jobs:
   release:
     name: Build and publish dmg
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
+
+      # CI 와 동일한 Xcode 를 쓴다 (프로젝트 생성 포맷 불일치 방지).
+      - name: Select Xcode
+        run: |
+          # 설치된 Xcode 중 가장 최신을 고른다. 경로를 고정하면 러너 이미지가
+          # 바뀔 때 깨지므로, 실제 존재하는 것 중에서 선택한다.
+          APP=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "선택: $APP"
+          sudo xcode-select -s "$APP"
+          xcodebuild -version
 
       - name: Install xcodegen
         run: brew install xcodegen
