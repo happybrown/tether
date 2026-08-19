@@ -1,0 +1,183 @@
+/* 언어 선택 */
+"language.system" = "System Default";
+
+/* 상태 (C 코어의 메시지 키 status.<key> 로 매핑) */
+"status.stopped" = "Stopped";
+"status.waiting" = "Waiting";
+"status.waiting_client" = "Waiting for client";
+"status.waiting_auth" = "Authenticating…";
+"status.unstable" = "Connection unstable";
+"status.reconnecting" = "Host not responding — reconnecting";
+"status.connected" = "Connected";
+"status.remote" = "Remote active";
+"status.auth_failed" = "Authentication failed";
+"status.psk_mismatch" = "PSK mismatch";
+"status.accessibility_required" = "Accessibility permission required";
+"status.restarting" = "Restarting…";
+"status.unknown" = "Unknown";
+
+/* 공통 */
+"common.start" = "Start";
+"common.stop" = "Stop";
+"common.port" = "Port";
+"common.host" = "Host";
+"common.not_set" = "Not set";
+"common.none" = "None";
+"common.reset" = "Reset";
+
+/* 방향 (client 위치) */
+"edge.right" = "Right";
+"edge.left" = "Left";
+"edge.top" = "Top";
+"edge.bottom" = "Bottom";
+
+/* 디스플레이 이름 */
+"display.builtin" = "Built-in Display";
+"display.main" = "Main Display";
+"display.external" = "External Display";
+
+/* RTT 체감 등급 */
+"grade.excellent" = "Excellent";
+"grade.good" = "Good";
+"grade.fair" = "Fair";
+"grade.slow" = "Slow";
+"grade.very_slow" = "Very slow";
+
+/* 손쉬운 사용 권한 */
+"permission.title" = "Accessibility Permission Required";
+"permission.host_hint_menubar" = "Permission is needed to capture keyboard and mouse input. Tap to open System Settings.";
+"permission.client_hint_menubar" = "Permission is needed to inject remote clicks and keystrokes. Tap to open System Settings.";
+"permission.host_hint_settings" = "Host mode needs system permission to capture keyboard and mouse events.";
+"permission.client_hint_settings" = "Client mode needs system permission to inject remote clicks and keystrokes.";
+"permission.help" = "System Settings > Privacy & Security > Accessibility";
+"permission.open_settings" = "Open System Settings";
+
+/* 메뉴바 팝오버 */
+"menubar.status_a11y" = "Status: %@";
+"menubar.mode_format" = "%@ mode";
+"menubar.help_settings" = "Settings (⌘,)";
+"menubar.host_ip_missing" = "Host IP not set";
+"menubar.host_ip_missing_hint" = "Enter the Host's IP address in Settings.";
+"menubar.client_position" = "Client Position";
+"menubar.my_ip" = "My IP";
+"menubar.my_ip_hint_host" = "Enter this address in the Client's settings";
+"menubar.my_ip_hint_client" = "The Host connects to this address";
+"menubar.connected_client" = "Connected Client";
+"menubar.psk_mismatch_fix" = "PSK mismatch — edit shared secret";
+"menubar.stop_help" = "End the session";
+"menubar.start_help" = "Start the session";
+"menubar.start_disabled_help" = "Complete the settings to start";
+"menubar.settings" = "Settings...";
+"menubar.logs" = "Logs...";
+"menubar.quit_format" = "Quit %@";
+
+/* 설정 창 */
+"app.settings_title" = "tether Settings";
+"tab.connection" = "Connection";
+"tab.control" = "Control";
+"tab.diagnostics" = "Diagnostics";
+"tab.general" = "General";
+"tab.logs" = "Logs";
+
+"settings.mode_section" = "Mode";
+"settings.role" = "Role";
+"settings.mode_locked" = "Mode cannot be changed while running";
+"settings.host_section" = "Host Settings";
+"settings.client_section" = "Client Settings";
+"settings.my_ip" = "My IP Address";
+"settings.host_ip" = "Host IP";
+"settings.host_ip_placeholder" = "e.g. 192.168.0.10";
+"settings.host_ip_required" = "Enter the Host IP";
+"settings.host_ip_invalid" = "Enter a valid IPv4 address (e.g. 192.168.0.10)";
+
+"settings.layout_section" = "Monitor Layout";
+"settings.trigger_label" = "Trigger";
+"settings.offset_format" = "Offset %+d%%";
+"settings.trigger_auto" = "Outer edge of all screens";
+"settings.trigger_disconnected" = "Disconnected display";
+"settings.layout_hint_multi" = "Drag the other Mac's box onto the edge of the screen you want. Switching happens only on that edge of that screen.";
+"settings.layout_hint_single" = "Drag the other Mac's box to position it. If the switch point feels misaligned, drag along the edge to adjust.";
+
+"settings.cursor_section" = "Cursor Behavior";
+"settings.predict_leave" = "Predictive Return";
+"settings.predict_leave_hint" = "The Host predicts when the cursor leaves the far edge and returns without delay.\nWhen off, return relies on the Client's signal (slightly slower, no false positives).";
+
+"settings.dirty" = "Unsaved changes";
+"settings.dirty_running" = "Unsaved changes — applying will reconnect";
+"settings.revert" = "Revert";
+"settings.apply" = "Apply";
+
+"settings.network_section" = "Network";
+"settings.port_default" = "Default 24900";
+"settings.port_error" = "Enter a number between 1 and 65535";
+"settings.ping_interval" = "Keep-alive Interval";
+"settings.seconds_format" = "%ds";
+"settings.ping_interval_hint" = "PING interval that keeps the connection with the Host";
+
+"settings.security_section" = "Security";
+"settings.psk" = "Shared Secret";
+"settings.psk_placeholder" = "Empty = no authentication";
+"settings.psk_hint" = "Enter the same value on both Macs";
+
+"settings.general_section" = "General";
+"settings.language" = "Language";
+"settings.launch_at_login" = "Launch at Login";
+"settings.launch_at_login_hint" = "Launches tether automatically when you log in to your Mac";
+"settings.auto_start" = "Auto-connect on Launch";
+"settings.auto_start_hint" = "Starts the session with saved settings when the app launches";
+
+"settings.shortcut_section" = "Shortcuts";
+"settings.shortcut_force_local" = "Force Local Return";
+"settings.shortcut_force_local_hint" = "Immediately returns control to the Host while in remote mode";
+"settings.shortcut_force_stop" = "Force Stop Session";
+"settings.shortcut_force_stop_hint" = "Ends the entire session when everything is stuck";
+
+"settings.about_section" = "About";
+"settings.version" = "Version";
+
+/* 모니터 배치 뷰 */
+"layout.other_mac" = "Other Mac";
+"layout.resolution_unknown" = "Resolution unknown (not connected)";
+"layout.drag_help" = "Drag the other Mac's box onto the edge of a screen";
+
+/* 로그 탭 */
+"log.level" = "Level";
+"log.all" = "All";
+"log.autoscroll" = "Auto-scroll";
+"log.autoscroll_help" = "Follows new log entries to the bottom";
+"log.save_file" = "Save to File";
+"log.save_file_help" = "Saves logs to ~/Library/Logs/Tether";
+"log.copy_all" = "Copy All";
+"log.open_folder" = "Open Log Folder";
+"log.clear" = "Clear";
+"log.more" = "More";
+"log.search" = "Search";
+"log.empty" = "No logs";
+"log.no_results" = "No results";
+"log.count_format" = "%d entries";
+"log.filtered" = "· Filtered";
+"log.copied" = "Copied";
+"log.file_help" = "Open log file location";
+
+/* 진단(네트워크 측정) 탭 */
+"netperf.section" = "Round-trip Latency";
+"netperf.measure" = "Measure";
+"netperf.measuring" = "Measuring…";
+"netperf.start" = "Start";
+"netperf.help_format" = "Measures %d round trips over about %d seconds";
+"netperf.help_disconnected" = "Available only while connected";
+"netperf.desc_format" = "Measures %d round trips (about %d seconds).";
+"netperf.desc_disconnected" = "Connect to the other Mac first.";
+"netperf.result" = "Result";
+"netperf.grade" = "Perceived Grade";
+"netperf.avg" = "Average";
+"netperf.min" = "Min";
+"netperf.max" = "Max";
+"netperf.jitter" = "Jitter (std dev)";
+"netperf.loss" = "Packet Loss";
+"netperf.no_response" = "No response. Check the connection.";
+"netperf.history_format" = "Last %d Measurements";
+"netperf.avg_rtt" = "Average RTT";
+"netperf.min_max" = "Min–Max";
+"netperf.clear_history" = "Clear History";
+"netperf.chart_index" = "Measurement";

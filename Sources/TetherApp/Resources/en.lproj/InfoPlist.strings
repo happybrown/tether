@@ -1,0 +1,2 @@
+/* 시스템 권한 대화상자에 표시되는 문구 */
+"NSAccessibilityUsageDescription" = "Accessibility permission is required to capture and forward keyboard and mouse events.";

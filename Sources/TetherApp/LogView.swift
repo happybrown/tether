@@ -4,6 +4,8 @@ import TetherCore
 
 struct LogView: View {
     @ObservedObject private var logger = TetherLogger.shared
+    // 언어 변경 시 즉시 다시 그려지도록 관찰한다.
+    @ObservedObject private var l10n   = L10n.shared
 
     @State private var search = ""
     @State private var autoScroll = true
@@ -25,8 +27,8 @@ struct LogView: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            Picker("레벨", selection: $logger.minLevel) {
-                Text("전체").tag(TETHER_LOG_DEBUG)
+            Picker(L("log.level"), selection: $logger.minLevel) {
+                Text(L("log.all")).tag(TETHER_LOG_DEBUG)
                 Text("INFO").tag(TETHER_LOG_INFO)
                 Text("ERROR").tag(TETHER_LOG_ERROR)
             }
@@ -39,31 +41,31 @@ struct LogView: View {
             Spacer(minLength: 8)
 
             Toggle(isOn: $autoScroll) {
-                Label("자동 스크롤", systemImage: "arrow.down.to.line")
+                Label(L("log.autoscroll"), systemImage: "arrow.down.to.line")
             }
             .toggleStyle(.button)
             .controlSize(.small)
-            .help("새 로그가 오면 맨 아래로 따라갑니다")
+            .help(L("log.autoscroll_help"))
 
             Toggle(isOn: $logger.fileLoggingEnabled) {
-                Label("파일 저장", systemImage: "square.and.arrow.down")
+                Label(L("log.save_file"), systemImage: "square.and.arrow.down")
             }
             .toggleStyle(.button)
             .controlSize(.small)
-            .help("로그를 ~/Library/Logs/Tether 에 저장합니다")
+            .help(L("log.save_file_help"))
 
             Menu {
-                Button("전체 복사") { copyAll() }
-                Button("로그 폴더 열기") { revealLogFolder() }
+                Button(L("log.copy_all")) { copyAll() }
+                Button(L("log.open_folder")) { revealLogFolder() }
                     .disabled(logger.logFileURL == nil)
                 Divider()
-                Button("지우기", role: .destructive) { logger.clear() }
+                Button(L("log.clear"), role: .destructive) { logger.clear() }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
             .frame(width: 28)
-            .help("더보기")
+            .help(L("log.more"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -74,7 +76,7 @@ struct LogView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            TextField("검색", text: $search)
+            TextField(L("log.search"), text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
             if !search.isEmpty {
@@ -132,7 +134,7 @@ struct LogView: View {
             Image(systemName: search.isEmpty ? "text.append" : "magnifyingglass")
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
-            Text(search.isEmpty ? "로그가 없습니다" : "검색 결과 없음")
+            Text(search.isEmpty ? L("log.empty") : L("log.no_results"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
@@ -142,15 +144,15 @@ struct LogView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            Text("\(visibleEntries.count)개")
+            Text(L("log.count_format", visibleEntries.count))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
             if !search.isEmpty || logger.minLevel != TETHER_LOG_DEBUG {
-                Text("· 필터됨").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(L("log.filtered")).font(.system(size: 11)).foregroundStyle(.tertiary)
             }
             Spacer()
             if copiedAll {
-                Label("복사됨", systemImage: "checkmark")
+                Label(L("log.copied"), systemImage: "checkmark")
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
             }
@@ -163,7 +165,7 @@ struct LogView: View {
                         .truncationMode(.middle)
                 }
                 .buttonStyle(.plain)
-                .help("로그 파일 위치 열기")
+                .help(L("log.file_help"))
             }
         }
         .padding(.horizontal, 12)

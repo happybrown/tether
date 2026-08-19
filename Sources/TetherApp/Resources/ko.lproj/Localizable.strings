@@ -1,0 +1,183 @@
+/* 언어 선택 */
+"language.system" = "시스템 기본";
+
+/* 상태 (C 코어의 메시지 키 status.<key> 로 매핑) */
+"status.stopped" = "중지됨";
+"status.waiting" = "대기 중";
+"status.waiting_client" = "Client 접속 대기 중";
+"status.waiting_auth" = "인증 대기 중";
+"status.unstable" = "연결 불안정";
+"status.reconnecting" = "호스트 응답 없음 — 재연결 중";
+"status.connected" = "연결됨";
+"status.remote" = "원격 활성";
+"status.auth_failed" = "인증 실패";
+"status.psk_mismatch" = "PSK 불일치";
+"status.accessibility_required" = "Event Tap 권한 필요 (손쉬운 사용)";
+"status.restarting" = "재시작 중...";
+"status.unknown" = "알 수 없음";
+
+/* 공통 */
+"common.start" = "시작";
+"common.stop" = "중지";
+"common.port" = "포트";
+"common.host" = "Host";
+"common.not_set" = "미설정";
+"common.none" = "없음";
+"common.reset" = "초기화";
+
+/* 방향 (client 위치) */
+"edge.right" = "오른쪽";
+"edge.left" = "왼쪽";
+"edge.top" = "위쪽";
+"edge.bottom" = "아래쪽";
+
+/* 디스플레이 이름 */
+"display.builtin" = "맥북 화면";
+"display.main" = "주 모니터";
+"display.external" = "외부 모니터";
+
+/* RTT 체감 등급 */
+"grade.excellent" = "아주 좋음";
+"grade.good" = "좋음";
+"grade.fair" = "보통";
+"grade.slow" = "느림";
+"grade.very_slow" = "매우 느림";
+
+/* 손쉬운 사용 권한 */
+"permission.title" = "손쉬운 사용 권한 필요";
+"permission.host_hint_menubar" = "키보드·마우스를 가로채기 위해 권한이 필요합니다. 탭하여 시스템 설정 열기.";
+"permission.client_hint_menubar" = "원격 클릭·키 입력을 주입하려면 권한이 필요합니다. 탭하여 시스템 설정 열기.";
+"permission.host_hint_settings" = "Host 모드는 키보드·마우스 이벤트를 가로채기 위해 시스템 권한이 필요합니다.";
+"permission.client_hint_settings" = "Client 모드는 원격 클릭·키 입력을 주입하기 위해 시스템 권한이 필요합니다.";
+"permission.help" = "시스템 설정 > 개인 정보 보호 및 보안 > 손쉬운 사용";
+"permission.open_settings" = "시스템 설정 열기";
+
+/* 메뉴바 팝오버 */
+"menubar.status_a11y" = "상태: %@";
+"menubar.mode_format" = "%@ 모드";
+"menubar.help_settings" = "설정 (⌘,)";
+"menubar.host_ip_missing" = "Host IP 미설정";
+"menubar.host_ip_missing_hint" = "설정에서 연결할 Host 의 IP 를 입력하세요.";
+"menubar.client_position" = "Client 위치";
+"menubar.my_ip" = "내 IP";
+"menubar.my_ip_hint_host" = "Client 쪽 설정에 이 주소를 입력하세요";
+"menubar.my_ip_hint_client" = "Host 에서 이 주소로 접속합니다";
+"menubar.connected_client" = "연결된 Client";
+"menubar.psk_mismatch_fix" = "PSK 불일치 — 공유 암호 수정";
+"menubar.stop_help" = "세션 종료";
+"menubar.start_help" = "세션 시작";
+"menubar.start_disabled_help" = "설정이 완료되어야 시작할 수 있습니다";
+"menubar.settings" = "설정...";
+"menubar.logs" = "로그...";
+"menubar.quit_format" = "%@ 종료";
+
+/* 설정 창 */
+"app.settings_title" = "tether 설정";
+"tab.connection" = "연결";
+"tab.control" = "제어";
+"tab.diagnostics" = "진단";
+"tab.general" = "일반";
+"tab.logs" = "로그";
+
+"settings.mode_section" = "모드";
+"settings.role" = "역할";
+"settings.mode_locked" = "실행 중에는 모드를 변경할 수 없습니다";
+"settings.host_section" = "Host 설정";
+"settings.client_section" = "Client 설정";
+"settings.my_ip" = "내 IP 주소";
+"settings.host_ip" = "Host IP";
+"settings.host_ip_placeholder" = "예: 192.168.0.10";
+"settings.host_ip_required" = "Host IP 를 입력하세요";
+"settings.host_ip_invalid" = "올바른 IPv4 주소를 입력하세요 (예: 192.168.0.10)";
+
+"settings.layout_section" = "모니터 배치";
+"settings.trigger_label" = "전환 기준";
+"settings.offset_format" = "오프셋 %+d%%";
+"settings.trigger_auto" = "전체 화면 바깥쪽";
+"settings.trigger_disconnected" = "연결 안 된 화면";
+"settings.layout_hint_multi" = "상대 Mac 사각형을 원하는 화면의 변에 끌어다 붙이세요. 그 화면의 그 방향에서만 전환됩니다.";
+"settings.layout_hint_single" = "상대 Mac 사각형을 끌어 배치하세요. 위아래(또는 좌우)로 어긋나면 경계 방향으로 끌어 보정합니다.";
+
+"settings.cursor_section" = "커서 동작";
+"settings.predict_leave" = "원격 복귀 예측";
+"settings.predict_leave_hint" = "반대편 경계 이탈을 Host 가 직접 예측해 지연 없이 복귀합니다.\n끄면 Client 신호로만 복귀합니다(약간 느리지만 오탐 없음).";
+
+"settings.dirty" = "미저장 변경";
+"settings.dirty_running" = "미저장 변경 — 적용 시 재연결됩니다";
+"settings.revert" = "되돌리기";
+"settings.apply" = "적용";
+
+"settings.network_section" = "네트워크";
+"settings.port_default" = "기본값 24900";
+"settings.port_error" = "1~65535 범위의 숫자를 입력하세요";
+"settings.ping_interval" = "연결 확인 간격";
+"settings.seconds_format" = "%d초";
+"settings.ping_interval_hint" = "Host 와의 연결 유지를 위한 PING 주기";
+
+"settings.security_section" = "보안";
+"settings.psk" = "공유 암호";
+"settings.psk_placeholder" = "비어있으면 인증 없음";
+"settings.psk_hint" = "양쪽 Mac 에 동일한 값을 입력하세요";
+
+"settings.general_section" = "일반";
+"settings.language" = "언어";
+"settings.launch_at_login" = "로그인 시 자동 실행";
+"settings.launch_at_login_hint" = "Mac 에 로그인할 때 tether 을 자동으로 실행합니다";
+"settings.auto_start" = "앱 실행 시 자동 연결";
+"settings.auto_start_hint" = "앱이 시작되면 저장된 설정으로 세션을 바로 시작합니다";
+
+"settings.shortcut_section" = "단축키";
+"settings.shortcut_force_local" = "로컬 강제 복귀";
+"settings.shortcut_force_local_hint" = "원격 모드에서 호스트로 즉시 복귀합니다";
+"settings.shortcut_force_stop" = "세션 강제 중지";
+"settings.shortcut_force_stop_hint" = "완전히 먹통이 됐을 때 세션 전체를 종료합니다";
+
+"settings.about_section" = "정보";
+"settings.version" = "버전";
+
+/* 모니터 배치 뷰 */
+"layout.other_mac" = "상대 Mac";
+"layout.resolution_unknown" = "해상도 미상 (미연결)";
+"layout.drag_help" = "상대 Mac 사각형을 원하는 화면의 변에 끌어다 붙이세요";
+
+/* 로그 탭 */
+"log.level" = "레벨";
+"log.all" = "전체";
+"log.autoscroll" = "자동 스크롤";
+"log.autoscroll_help" = "새 로그가 오면 맨 아래로 따라갑니다";
+"log.save_file" = "파일 저장";
+"log.save_file_help" = "로그를 ~/Library/Logs/Tether 에 저장합니다";
+"log.copy_all" = "전체 복사";
+"log.open_folder" = "로그 폴더 열기";
+"log.clear" = "지우기";
+"log.more" = "더보기";
+"log.search" = "검색";
+"log.empty" = "로그가 없습니다";
+"log.no_results" = "검색 결과 없음";
+"log.count_format" = "%d개";
+"log.filtered" = "· 필터됨";
+"log.copied" = "복사됨";
+"log.file_help" = "로그 파일 위치 열기";
+
+/* 진단(네트워크 측정) 탭 */
+"netperf.section" = "왕복 지연 측정";
+"netperf.measure" = "측정";
+"netperf.measuring" = "측정 중…";
+"netperf.start" = "측정 시작";
+"netperf.help_format" = "약 %2$d초간 %1$d회 왕복 측정";
+"netperf.help_disconnected" = "연결된 상태에서만 측정할 수 있습니다";
+"netperf.desc_format" = "%d회 왕복 지연을 측정합니다 (약 %d초).";
+"netperf.desc_disconnected" = "상대 Mac 과 연결된 뒤 측정할 수 있습니다.";
+"netperf.result" = "결과";
+"netperf.grade" = "체감 등급";
+"netperf.avg" = "평균";
+"netperf.min" = "최소";
+"netperf.max" = "최대";
+"netperf.jitter" = "지터(표준편차)";
+"netperf.loss" = "패킷 손실";
+"netperf.no_response" = "응답이 없습니다. 연결 상태를 확인하세요.";
+"netperf.history_format" = "최근 %d회 추이";
+"netperf.avg_rtt" = "평균 RTT";
+"netperf.min_max" = "최소~최대";
+"netperf.clear_history" = "이력 지우기";
+"netperf.chart_index" = "측정";

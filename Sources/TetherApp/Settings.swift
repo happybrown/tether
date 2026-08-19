@@ -10,10 +10,10 @@ enum ClientEdge: Int, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .right:  return "오른쪽"
-        case .left:   return "왼쪽"
-        case .top:    return "위쪽"
-        case .bottom: return "아래쪽"
+        case .right:  return L("edge.right")
+        case .left:   return L("edge.left")
+        case .top:    return L("edge.top")
+        case .bottom: return L("edge.bottom")
         }
     }
 }

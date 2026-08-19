@@ -50,7 +50,9 @@ typedef enum {
 } TetherLogLevel;
 #endif
 
-// 상태 변경 콜백 (Swift → 등록, C++ → 호출)
+// 상태 변경 콜백 (Swift → 등록, C++ → 호출).
+// message 는 사람이 읽는 문구가 아니라 안정적인 메시지 키다 (예: "connected",
+// "waiting_client"). Swift 계층이 키를 사용자의 언어로 변환해 표시한다.
 typedef void (*TetherStatusCallback)(TetherStatus status, const char* message, void* ctx);
 
 // 로그 콜백 — 레벨, 카테고리, 메시지를 Swift로 전달
@@ -139,6 +141,11 @@ void tether_set_force_stop_callback(TetherForceStopCallback cb, void* ctx);
 void tether_displays_changed(void);
 
 TetherStatus tether_get_status(void);
+
+// 연결된 상대 Mac 의 호스트명을 out 에 복사한다 (null-terminated).
+// host: 인증된 client 의 호스트명, client: 인증해 준 host 의 호스트명.
+// 미연결(인증 전/해제 후)이면 false 를 반환하고 out 은 빈 문자열이 된다.
+bool tether_get_peer_hostname(char* out, int out_size);
 
 // 현재 호스트의 로컬 IP 목록 — '\n'으로 구분된 문자열을 out 버퍼에 기록
 // out_size: 버퍼 크기, 반환값: 기록된 IP 개수

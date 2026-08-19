@@ -58,6 +58,21 @@ static char              g_psk[128]     = {};
 static char              g_hostname[32] = {};
 std::atomic<bool>        g_auth_ok{false};
 
+// 연결된 상대(peer)의 호스트명. host: 인증된 client, client: 인증해 준 host.
+// recv 스레드가 쓰고 Swift(메인 스레드)가 읽으므로 mutex 로 보호한다.
+static std::mutex        g_peer_hostname_mu;
+static char              g_peer_hostname[32] = {};
+
+static void set_peer_hostname(const char* name) {
+    std::lock_guard<std::mutex> lock(g_peer_hostname_mu);
+    if (name) {
+        strncpy(g_peer_hostname, name, sizeof(g_peer_hostname) - 1);
+        g_peer_hostname[sizeof(g_peer_hostname) - 1] = '\0';
+    } else {
+        g_peer_hostname[0] = '\0';
+    }
+}
+
 // client: PING 루프 (인증 후 주기적 PING 전송)
 static std::thread       g_ping_thread;
 static std::atomic<bool> g_ping_running{false};
@@ -185,6 +200,9 @@ void tether_send_clipboard(const uint8_t* data, uint32_t len) {
 }
 
 /// 상태를 원자적으로 업데이트하고 등록된 콜백을 호출한다.
+/// msg 는 사람이 읽는 문구가 아니라 안정적인 메시지 키다 (예: "connected").
+/// Swift 계층이 키를 사용자의 언어로 변환해 표시한다 — 여기서 문구를 바꾸면
+/// 다국어 매핑이 깨지므로 새 상태는 키를 추가하고 Swift 쪽 매핑도 함께 갱신할 것.
 void set_status(TetherStatus s, const char* msg) {
     g_status.store(s);
     if (g_cb) g_cb(s, msg, g_ctx);
@@ -202,8 +220,8 @@ static void send_hello() {
     strncpy(pkt.hostname, g_hostname, sizeof(pkt.hostname) - 1);
     pkt.timestamp_s = (int64_t)time(nullptr);
 
-    TETHER_DEBUG(CAT_AUTH, "[클라이언트] HELLO 패킷 생성: 호스트명=%s, 타임스탬프=%lld, PSK 사용=%s",
-                pkt.hostname, (long long)pkt.timestamp_s, strlen(g_psk) > 0 ? "예" : "아니오");
+    TETHER_DEBUG(CAT_AUTH, "[client] HELLO packet created: hostname=%s, timestamp=%lld, PSK used=%s",
+                pkt.hostname, (long long)pkt.timestamp_s, strlen(g_psk) > 0 ? "yes" : "no");
 
     if (strlen(g_psk) > 0) {
         char hn32[32] = {};
@@ -213,7 +231,7 @@ static void send_hello() {
     // PSK 없으면 hmac은 zero → host에서 open mode로 수락
 
     g_engine->send_raw_any(&pkt, sizeof(pkt));
-    TETHER_DEBUG(CAT_NETWORK, "[클라이언트] HELLO 패킷 전송됨");
+    TETHER_DEBUG(CAT_NETWORK, "[client] HELLO packet sent");
 }
 
 // ── 공개 API ─────────────────────────────────────────────────────────
@@ -222,13 +240,13 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
     tether_install_safety_hooks();
 
-    TETHER_INFO(CAT_NETWORK, "tether_start: 모드=%s, 포트=%d, PSK=%s",
-               config->is_host ? "호스트" : "클라이언트",
+    TETHER_INFO(CAT_NETWORK, "tether_start: mode=%s, port=%d, PSK=%s",
+               config->is_host ? "host" : "client",
                config->port,
-               strlen(config->psk) > 0 ? "설정됨" : "없음");
+               strlen(config->psk) > 0 ? "set" : "none");
 
     if (g_status.load() != TETHER_STATUS_IDLE) {
-        TETHER_ERROR(CAT_NETWORK, "tether_start 실패: 이미 실행 중 (상태=%d)", (int)g_status.load());
+        TETHER_ERROR(CAT_NETWORK, "tether_start failed: already running (status=%d)", (int)g_status.load());
         return false;
     }
 
@@ -250,7 +268,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     // 시작 직후 경계에 커서가 있어도 즉시 원격 진입하지 않도록 보호 시각을 현재로 설정한다.
     g_remote.return_time = std::chrono::steady_clock::now();
 
-    TETHER_INFO(CAT_NETWORK, "tether 시작: 호스트명=%s, 포트=%d", g_hostname, g_cfg.port);
+    TETHER_INFO(CAT_NETWORK, "tether started: hostname=%s, port=%d", g_hostname, g_cfg.port);
 
     if (g_cfg.is_host) {
         // 기준 화면은 레이아웃 계산 전에 반영해야 첫 refresh 부터 적용된다.
@@ -262,7 +280,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             g_client_width.store(pkt.width, std::memory_order_relaxed);
             g_client_height.store(pkt.height, std::memory_order_relaxed);
             g_client_size_known.store(true, std::memory_order_release);
-            TETHER_DEBUG(CAT_NETWORK, "[호스트] 클라이언트 화면 크기=%dx%d", pkt.width, pkt.height);
+            TETHER_DEBUG(CAT_NETWORK, "[host] client screen size=%dx%d", pkt.width, pkt.height);
         };
 
         auto on_mouse = [](const MousePacket&) {
@@ -272,7 +290,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
         // host: 클라이언트 복귀 요청 수신 (host 자체 예측이 주 경로, 이건 안전망)
         auto on_leave = [](const LeavePacket& pkt) {
             double ratio = static_cast<double>(pkt.ratio) / 32767.0;
-            TETHER_INFO(CAT_CURSOR, "[호스트] 클라이언트 복귀 요청 수신(안전망): 비율=%.3f", ratio);
+            TETHER_INFO(CAT_CURSOR, "[host] client return-to-local request received (safety net): ratio=%.3f", ratio);
             request_leave_remote(ratio);
         };
 
@@ -281,12 +299,12 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             int64_t now  = (int64_t)time(nullptr);
             int64_t diff = pkt.timestamp_s - now;
             if (diff < -30 || diff > 30) {
-                TETHER_ERROR(CAT_AUTH, "[호스트] HELLO 거부됨: 타임스탬프 허용 범위 초과 (diff=%llds, 클라이언트=%s)",
+                TETHER_ERROR(CAT_AUTH, "[host] HELLO rejected: timestamp out of allowed window (diff=%llds, client=%s)",
                             (long long)diff, pkt.hostname);
                 return;
             }
 
-            TETHER_INFO(CAT_AUTH, "[호스트] HELLO 수신: 클라이언트=%s, diff=%llds, 인증방식=%s",
+            TETHER_INFO(CAT_AUTH, "[host] HELLO received: client=%s, diff=%llds, auth mode=%s",
                        pkt.hostname, (long long)diff, strlen(g_psk) > 0 ? "HMAC" : "Open");
 
             bool accepted = false;
@@ -305,10 +323,11 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
 
             if (accepted) {
                 g_engine->set_peer(sender);
-                TETHER_INFO(CAT_AUTH, "[호스트] 인증 성공: %s (%s)", pkt.hostname, ip_str);
-                set_status(TETHER_STATUS_CONNECTED, pkt.hostname);
+                TETHER_INFO(CAT_AUTH, "[host] auth accepted: %s (%s)", pkt.hostname, ip_str);
+                set_peer_hostname(pkt.hostname);
+                set_status(TETHER_STATUS_CONNECTED, "connected");
             } else {
-                TETHER_ERROR(CAT_AUTH, "[호스트] 인증 실패: %s (%s) PSK 불일치", pkt.hostname, ip_str);
+                TETHER_ERROR(CAT_AUTH, "[host] auth rejected: %s (%s) PSK mismatch", pkt.hostname, ip_str);
             }
 
             g_engine->send_auth_result(accepted, g_hostname, sender);
@@ -319,7 +338,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             g_last_ping_time.store(time(nullptr), std::memory_order_release);
             // 현재 원격 활성 상태를 PONG 에 실어 client 가 커서 상태를 자가교정하게 한다.
             uint8_t active = g_remote.active.load(std::memory_order_acquire) ? 1 : 0;
-            TETHER_DEBUG(CAT_AUTH, "[호스트] PING 수신 → PONG 전송 (active=%u)", active);
+            TETHER_DEBUG(CAT_AUTH, "[host] PING received → sending PONG (active=%u)", active);
             g_engine->send_pong(active);
         };
 
@@ -329,8 +348,8 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
 
         // 소켓 에러 시 즉시 입력 복원
         auto on_disconnect_host = []() {
-            TETHER_ERROR(CAT_NETWORK, "[호스트] 소켓 연결 끊김 감지 — 입력 복원");
-            force_leave_remote("소켓 에러");
+            TETHER_ERROR(CAT_NETWORK, "[host] socket disconnect detected — restoring input");
+            force_leave_remote("socket error");
         };
 
         g_engine = new NetworkEngine(nullptr, g_cfg.port,
@@ -362,25 +381,25 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
 
                 // 원격 모드 중 빠른 복귀: 짧은 타임아웃으로 먹통 최소화
                 if (in_remote && elapsed >= g_remote_fast_timeout_s) {
-                    TETHER_ERROR(CAT_AUTH, "[호스트] 원격 모드 중 PING 무응답 (%.0fs) — 즉시 로컬 복귀", elapsed);
-                    force_leave_remote("원격 모드 중 연결 끊김");
+                    TETHER_ERROR(CAT_AUTH, "[host] no PING during remote mode (%.0fs) — immediate return to local", elapsed);
+                    force_leave_remote("connection lost during remote mode");
                     if (elapsed >= PEER_TIMEOUT_S) {
                         host_reset_peer("ping timeout (remote)");
                         warned = false;
                     } else if (!warned) {
-                        set_status(TETHER_STATUS_WAITING, "연결 불안정");
+                        set_status(TETHER_STATUS_WAITING, "unstable");
                         warned = true;
                     }
                     continue;
                 }
 
                 if (elapsed >= PEER_TIMEOUT_S) {
-                    TETHER_ERROR(CAT_AUTH, "[호스트] PING 타임아웃 (%.0fs) — peer 초기화", elapsed);
+                    TETHER_ERROR(CAT_AUTH, "[host] PING timeout (%.0fs) — resetting peer", elapsed);
                     host_reset_peer("ping timeout");
                     warned = false;
                 } else if (!warned && elapsed >= PEER_WARNING_S) {
-                    TETHER_INFO(CAT_AUTH, "[호스트] PING 지연 (%.0fs) — 연결 불안정", elapsed);
-                    set_status(TETHER_STATUS_WAITING, "연결 불안정");
+                    TETHER_INFO(CAT_AUTH, "[host] PING delayed (%.0fs) — connection unstable", elapsed);
+                    set_status(TETHER_STATUS_WAITING, "unstable");
                     warned = true;
                 }
             }
@@ -400,7 +419,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                 return;
             }
 
-            set_status(TETHER_STATUS_WAITING, "client 접속 대기 중");
+            set_status(TETHER_STATUS_WAITING, "waiting_client");
             {
                 std::lock_guard<std::mutex> lk(g_run_loop_mu);
                 g_run_loop.store(CFRunLoopGetCurrent(), std::memory_order_release);
@@ -428,21 +447,21 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
         auto on_mouse = [](const MousePacket& pkt) {
             // 인증 완료 전에는 host 패킷 무시
             if (!g_auth_ok.load(std::memory_order_acquire)) {
-                TETHER_DEBUG(CAT_NETWORK, "[클라이언트] 패킷 무시됨 (인증 전): 타입=%u", pkt.event_type);
+                TETHER_DEBUG(CAT_NETWORK, "[client] packet ignored (before auth): type=%u", pkt.event_type);
                 return;
             }
 
-            TETHER_DEBUG(CAT_EVENT, "[클라이언트] 마우스 패킷: 타입=%u, dx=%d, dy=%d",
+            TETHER_DEBUG(CAT_EVENT, "[client] mouse packet: type=%u, dx=%d, dy=%d",
                 pkt.event_type, (int)pkt.dx, (int)pkt.dy);
 
             switch (pkt.event_type) {
             case EVENT_SYNC_CURSOR:
-                TETHER_INFO(CAT_CURSOR, "원격 모드 전환");
+                TETHER_INFO(CAT_CURSOR, "entering remote mode");
                 client_handle_sync(pkt);
                 // 원격 모드 진입 시점을 기준으로 PONG 타임아웃을 리셋.
                 // 진입 전 마지막 PONG이 오래전이더라도 즉시 타임아웃 판정하지 않도록.
                 g_last_pong_time.store(time(nullptr), std::memory_order_release);
-                set_status(TETHER_STATUS_REMOTE, "원격 모드");
+                set_status(TETHER_STATUS_REMOTE, "remote");
                 break;
             case EVENT_SHOW_CURSOR:
                 // 호스트가 로컬로 복귀 → 클라이언트 커서를 화면 밖으로 밀어 감춘다.
@@ -450,13 +469,13 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                 client_hide_cursor_offscreen();
                 g_client.cursor_hidden = true;
                 g_client.pos_init = false;
-                set_status(TETHER_STATUS_CONNECTED, "연결됨");
+                set_status(TETHER_STATUS_CONNECTED, "connected");
                 break;
             default:
                 if (g_client.pos_init) {
                     client_handle_move(pkt);
                 } else {
-                    TETHER_DEBUG(CAT_CURSOR, "[클라이언트] 커서 이동 무시됨 (위치 미초기화): 타입=%u",
+                    TETHER_DEBUG(CAT_CURSOR, "[client] cursor move ignored (position not initialized): type=%u",
                                 pkt.event_type);
                 }
                 break;
@@ -481,12 +500,14 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                 // 재연결 시 화면 정보가 바뀌었을 수 있으므로 갱신 후 전송
                 g_client.screen = get_screen_bounds();
                 send_client_info();
-                set_status(TETHER_STATUS_CONNECTED, "연결됨");
-                TETHER_INFO(CAT_AUTH, "[클라이언트] 인증 성공: 호스트=%s", pkt.host_hostname);
+                set_peer_hostname(pkt.host_hostname);
+                set_status(TETHER_STATUS_CONNECTED, "connected");
+                TETHER_INFO(CAT_AUTH, "[client] auth accepted: host=%s", pkt.host_hostname);
             } else {
                 g_auth_ok.store(false, std::memory_order_release);
-                set_status(TETHER_STATUS_AUTH_FAILED, "PSK 불일치");
-                TETHER_ERROR(CAT_AUTH, "[클라이언트] 인증 실패 (호스트가 거부)");
+                set_peer_hostname(nullptr);
+                set_status(TETHER_STATUS_AUTH_FAILED, "psk_mismatch");
+                TETHER_ERROR(CAT_AUTH, "[client] auth failed (rejected by host)");
             }
         };
 
@@ -501,17 +522,17 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             // host 로컬(0) 인데 client 는 원격(pos_init=true): SHOW_CURSOR 유실 →
             // 양측에 커서가 동시 표시된 상태. client 커서를 숨기고 로컬로 되돌린다.
             if (host_active == 0 && g_client.pos_init) {
-                TETHER_INFO(CAT_CURSOR, "[클라이언트] 상태 불일치 교정: host 로컬인데 원격 유지 → 커서 숨김");
+                TETHER_INFO(CAT_CURSOR, "[client] state mismatch corrected: host local but client remote → hiding cursor");
                 g_client.pos_init = false;
                 client_hide_cursor_offscreen();
                 g_client.cursor_hidden = true;
-                set_status(TETHER_STATUS_CONNECTED, "연결됨");
+                set_status(TETHER_STATUS_CONNECTED, "connected");
             }
             // host 원격(1) 인데 client 는 로컬(pos_init=false): SYNC_CURSOR 유실.
             // 위치 비율 정보가 없어 여기서 커서를 복원하지 않는다. host 가 다음 이동/복귀
             // 패킷으로 재동기화하며, 그때까지 잠깐 양측 커서가 안 보일 수 있다(무해).
             else if (host_active == 1 && !g_client.pos_init) {
-                TETHER_DEBUG(CAT_CURSOR, "[클라이언트] 상태 불일치 감지: host 원격인데 로컬 (SYNC 대기)");
+                TETHER_DEBUG(CAT_CURSOR, "[client] state mismatch detected: host remote but client local (waiting for SYNC)");
             }
         };
 
@@ -522,8 +543,8 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
 
         // 소켓 에러 시 즉시 입력 복원
         auto on_disconnect_client = []() {
-            TETHER_ERROR(CAT_NETWORK, "[클라이언트] 소켓 연결 끊김 감지 — 입력 복원");
-            client_reset_on_host_dead("소켓 에러");
+            TETHER_ERROR(CAT_NETWORK, "[client] socket disconnect detected — restoring input");
+            client_reset_on_host_dead("socket error");
         };
 
         g_engine = new NetworkEngine(g_cfg.host_ip, g_cfg.port,
@@ -533,10 +554,10 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
         g_engine->set_probe_callback(handle_probe);
         g_engine->start();
 
-        TETHER_INFO(CAT_AUTH, "[클라이언트] HELLO 전송: %s:%d (재시도 간격=%us)",
+        TETHER_INFO(CAT_AUTH, "[client] sending HELLO: %s:%d (retry interval=%us)",
                    g_cfg.host_ip, g_cfg.port, g_reconnect_interval_s);
         send_hello();
-        set_status(TETHER_STATUS_WAITING, "인증 대기 중");
+        set_status(TETHER_STATUS_WAITING, "waiting_auth");
 
         // ping 루프: 인증 전에는 HELLO 재전송, 인증 후에는 PING 전송.
         // PONG 이 pong_timeout_s 이상 오지 않으면 Host 사망으로 판정해 재인증으로 돌아간다.
@@ -573,7 +594,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                 elapsed_ms = 0;
 
                 if (g_auth_ok.load(std::memory_order_acquire)) {
-                    TETHER_DEBUG(CAT_AUTH, "[클라이언트] PING 전송");
+                    TETHER_DEBUG(CAT_AUTH, "[client] sending PING");
                     g_engine->send_ping();
 
                     time_t last = g_last_pong_time.load(std::memory_order_acquire);
@@ -583,18 +604,18 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                         int timeout = in_remote ? pong_timeout_remote_s : pong_timeout_s;
                         if (elapsed >= timeout) {
                             client_reset_on_host_dead(
-                                in_remote ? "PONG 타임아웃 (원격 모드)" : "PONG 타임아웃");
+                                in_remote ? "PONG timeout (remote mode)" : "PONG timeout");
                         }
                     }
                 } else {
-                    TETHER_INFO(CAT_AUTH, "[클라이언트] HELLO 재전송 (미인증 또는 재연결)");
+                    TETHER_INFO(CAT_AUTH, "[client] resending HELLO (unauthenticated or reconnecting)");
                     send_hello();
                 }
             }
         });
     }
 
-    TETHER_INFO(CAT_NETWORK, "tether_start 완료");
+    TETHER_INFO(CAT_NETWORK, "tether_start done");
     return true;
 }
 
@@ -654,24 +675,25 @@ void tether_install_safety_hooks() {
         if (old.sa_handler == SIG_DFL || old.sa_handler == SIG_IGN)
             sigaction(s, &sa, nullptr);
     }
-    TETHER_INFO(CAT_NETWORK, "safety hook 설치 완료");
+    TETHER_INFO(CAT_NETWORK, "safety hooks installed");
 }
 
 // host 전용: peer 연결을 초기화하고 대기 상태로 복귀.
 // 원격 모드였다면 먼저 로컬 복귀시켜 Host 의 마우스/키보드 소비를 멈춘다.
 static void host_reset_peer(const char* reason) {
-    TETHER_INFO(CAT_AUTH, "[호스트] peer 연결 초기화: %s", reason);
+    TETHER_INFO(CAT_AUTH, "[host] resetting peer connection: %s", reason);
     force_leave_remote(reason);
     g_engine->clear_peer();
     g_last_ping_time.store(0, std::memory_order_release);
-    set_status(TETHER_STATUS_WAITING, "client 접속 대기 중");
+    set_peer_hostname(nullptr);
+    set_status(TETHER_STATUS_WAITING, "waiting_client");
 }
 
 // client 전용: Host 무응답 감지 시 호출. 인증/원격 상태를 해제해
 // 다음 ping 루프에서 HELLO 재전송으로 자동 재연결되도록 한다.
 // 즉시 입력을 복원하여 사용자가 로컬 Mac을 정상 사용할 수 있게 한다.
 static void client_reset_on_host_dead(const char* reason) {
-    TETHER_ERROR(CAT_AUTH, "[클라이언트] 호스트 연결 끊김 감지: %s", reason);
+    TETHER_ERROR(CAT_AUTH, "[client] host disconnect detected: %s", reason);
     g_auth_ok.store(false, std::memory_order_release);
 
     // 즉시 입력 복원 — 원격 모드 중이었다면 커서를 화면 안으로 되돌리고 위치를 초기화
@@ -685,12 +707,13 @@ static void client_reset_on_host_dead(const char* reason) {
     CGAssociateMouseAndMouseCursorPosition(true);
 
     g_last_pong_time.store(0, std::memory_order_release);
-    set_status(TETHER_STATUS_WAITING, "호스트 응답 없음 — 재연결 중");
+    set_peer_hostname(nullptr);
+    set_status(TETHER_STATUS_WAITING, "reconnecting");
 }
 
 void tether_stop() {
     std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
-    TETHER_INFO(CAT_NETWORK, "tether_stop: 연결 종료 시작");
+    TETHER_INFO(CAT_NETWORK, "tether_stop: shutting down");
 
     // join 대기 중 set_status → Swift 콜백 → 메인 스레드 데드락 방지
     g_cb  = nullptr;
@@ -738,21 +761,31 @@ void tether_stop() {
     g_auth_ok.store(false, std::memory_order_release);
     g_last_pong_time.store(0, std::memory_order_release);
     g_client_displays_dirty.store(false, std::memory_order_release);
-    set_status(TETHER_STATUS_IDLE, "중지됨");
+    set_peer_hostname(nullptr);
+    set_status(TETHER_STATUS_IDLE, "stopped");
 
-    TETHER_INFO(CAT_NETWORK, "tether_stop 완료");
+    TETHER_INFO(CAT_NETWORK, "tether_stop done");
 }
 
 TetherStatus tether_get_status() {
     return g_status.load();
 }
 
+bool tether_get_peer_hostname(char* out, int out_size) {
+    if (!out || out_size <= 0) return false;
+    std::lock_guard<std::mutex> lock(g_peer_hostname_mu);
+    if (g_peer_hostname[0] == '\0') { out[0] = '\0'; return false; }
+    strncpy(out, g_peer_hostname, out_size - 1);
+    out[out_size - 1] = '\0';
+    return true;
+}
+
 void tether_force_local() {
     if (g_status.load() == TETHER_STATUS_IDLE) return;
     if (g_cfg.is_host) {
-        force_leave_remote("사용자 요청");
+        force_leave_remote("user request");
     } else {
-        client_reset_on_host_dead("사용자 요청");
+        client_reset_on_host_dead("user request");
     }
 }
 
@@ -832,7 +865,7 @@ void tether_displays_changed() {
         // host: 현재 경계로 레이아웃을 재계산한다. apply_client_edge 가 RunLoop 스레드에서
         // 원격 모드 복귀 + refresh_layout 을 수행하므로 그대로 재사용한다.
         // (host 는 CGDisplayRegisterReconfigurationCallback 도 있어 이중 안전망이다.)
-        TETHER_INFO(CAT_CURSOR, "[호스트] 디스플레이 변경 통지 — 레이아웃 재계산");
+        TETHER_INFO(CAT_CURSOR, "[host] display change notified — recalculating layout");
         apply_client_edge(g_cfg.client_edge);
     } else {
         // client: 화면 재계산은 커서/화면 상태를 만지므로 recv·ping 스레드로 위임한다.
@@ -944,7 +977,7 @@ bool tether_run_netperf(int count, int interval_ms, TetherNetPerfCallback cb, vo
         }
 
         TETHER_INFO(CAT_NETWORK,
-            "[성능측정] 전송=%d 수신=%d 손실=%.0f%% RTT min/avg/max=%.1f/%.1f/%.1fms 지터=%.1fms",
+            "[netperf] sent=%d received=%d loss=%.0f%% RTT min/avg/max=%.1f/%.1f/%.1fms jitter=%.1fms",
             r.sent, r.received, r.loss_pct, r.min_ms, r.avg_ms, r.max_ms, r.stddev_ms);
 
         cb(&r, ctx);

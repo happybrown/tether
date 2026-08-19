@@ -5,6 +5,8 @@ import SwiftUI
 struct NetworkTestView: View {
     @ObservedObject private var manager = TetherManager.shared
     @ObservedObject private var history = NetPerfHistory.shared
+    // 언어 변경 시 즉시 다시 그려지도록 관찰한다.
+    @ObservedObject private var l10n    = L10n.shared
 
     @State private var running = false
     @State private var result: NetPerfResult?
@@ -20,9 +22,9 @@ struct NetworkTestView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                FormSection(title: "왕복 지연 측정", icon: "speedometer") {
+                FormSection(title: L("netperf.section"), icon: "speedometer") {
                     VStack(spacing: 0) {
-                        FormRow(label: "측정") {
+                        FormRow(label: L("netperf.measure")) {
                             measureButton
                         }
                         Divider().padding(.leading, 16)
@@ -51,24 +53,24 @@ struct NetworkTestView: View {
             HStack(spacing: 6) {
                 if running {
                     ProgressView().controlSize(.small)
-                    Text("측정 중…")
+                    Text(L("netperf.measuring"))
                 } else {
                     Image(systemName: "play.fill")
-                    Text("측정 시작")
+                    Text(L("netperf.start"))
                 }
             }
             .frame(minWidth: 96)
         }
         .disabled(running || !canMeasure)
-        .help(canMeasure ? "약 5초간 \(probeCount)회 왕복 측정"
-                         : "연결된 상태에서만 측정할 수 있습니다")
+        .help(canMeasure ? L("netperf.help_format", probeCount, probeCount * intervalMs / 1000)
+                         : L("netperf.help_disconnected"))
     }
 
     private var descriptionRow: some View {
         HStack {
             Text(canMeasure
-                 ? "\(probeCount)회 왕복 지연을 측정합니다 (약 \(probeCount * intervalMs / 1000)초)."
-                 : "상대 Mac 과 연결된 뒤 측정할 수 있습니다.")
+                 ? L("netperf.desc_format", probeCount, probeCount * intervalMs / 1000)
+                 : L("netperf.desc_disconnected"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -82,25 +84,25 @@ struct NetworkTestView: View {
 
     @ViewBuilder
     private func resultSection(_ r: NetPerfResult) -> some View {
-        FormSection(title: "결과", icon: "chart.bar") {
+        FormSection(title: L("netperf.result"), icon: "chart.bar") {
             VStack(spacing: 0) {
                 if r.hasData {
                     gradeRow(r)
                     Divider().padding(.leading, 16)
-                    metricRow("평균", r.avgMs, emphasize: true)
+                    metricRow(L("netperf.avg"), r.avgMs, emphasize: true)
                     Divider().padding(.leading, 16)
-                    metricRow("최소", r.minMs)
+                    metricRow(L("netperf.min"), r.minMs)
                     Divider().padding(.leading, 16)
-                    metricRow("최대", r.maxMs)
+                    metricRow(L("netperf.max"), r.maxMs)
                     Divider().padding(.leading, 16)
-                    metricRow("지터(표준편차)", r.stddevMs)
+                    metricRow(L("netperf.jitter"), r.stddevMs)
                     Divider().padding(.leading, 16)
                     lossRow(r)
                 } else {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
-                        Text("응답이 없습니다. 연결 상태를 확인하세요.")
+                        Text(L("netperf.no_response"))
                             .font(.system(size: 12))
                         Spacer(minLength: 0)
                     }
@@ -113,7 +115,7 @@ struct NetworkTestView: View {
 
     private func gradeRow(_ r: NetPerfResult) -> some View {
         let g = r.grade
-        return FormRow(label: "체감 등급") {
+        return FormRow(label: L("netperf.grade")) {
             HStack(spacing: 6) {
                 Circle().fill(g.color).frame(width: 8, height: 8)
                 Text(g.label)
@@ -134,7 +136,7 @@ struct NetworkTestView: View {
     }
 
     private func lossRow(_ r: NetPerfResult) -> some View {
-        FormRow(label: "패킷 손실") {
+        FormRow(label: L("netperf.loss")) {
             Text(String(format: "%.0f%% (%d/%d)", r.lossPct, r.received, r.sent))
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(r.lossPct > 0 ? .orange : .secondary)
@@ -144,13 +146,14 @@ struct NetworkTestView: View {
     // ── 추이 차트 ─────────────────────────────────────────────────────
 
     private var chartSection: some View {
-        FormSection(title: "최근 \(NetPerfHistory.maxEntries)회 추이", icon: "chart.xyaxis.line") {
+        FormSection(title: L("netperf.history_format", NetPerfHistory.maxEntries),
+                    icon: "chart.xyaxis.line") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
-                    legendItem(color: .blue, filled: true, label: "평균 RTT")
-                    legendItem(color: .blue.opacity(0.3), filled: false, label: "최소~최대")
+                    legendItem(color: .blue, filled: true, label: L("netperf.avg_rtt"))
+                    legendItem(color: .blue.opacity(0.3), filled: false, label: L("netperf.min_max"))
                     Spacer()
-                    Button("이력 지우기") { history.clear() }
+                    Button(L("netperf.clear_history")) { history.clear() }
                         .font(.system(size: 11))
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)

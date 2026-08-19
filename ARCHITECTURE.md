@@ -27,6 +27,8 @@ macOS 메뉴바 앱. 두 Mac 사이에서 마우스/키보드/클립보드를 UD
 │       ├── TetherManager.swift  # C API 래퍼, 상태 관리 (ObservableObject)
 │       ├── TetherStatus+Swift.swift   # TetherStatus C enum → Swift extension
 │       ├── Settings.swift       # AppSettings (UserDefaults 영속화)
+│       ├── Localization.swift   # 다국어: AppLanguage, L10n, L() 조회 함수
+│       ├── Resources/           # 언어별 문자열 (en.lproj / ko.lproj)
 │       ├── SettingsView.swift   # 설정 창 UI (연결/보안/일반/로그 탭)
 │       ├── SettingsComponents.swift   # 설정 공용 폼 컴포넌트 (FormSection 등)
 │       ├── MonitorLayoutView.swift    # 모니터 배치 시각 선택 UI
@@ -147,7 +149,7 @@ host→client 진입 비율에 -offset, client→host 복귀 비율에 +offset�
 
 | 타입 | 크기 | 방향 | 용도 |
 |------|------|------|------|
-| MousePacket | 9B | 양방향 | 마우스 이동/클릭/스크롤, 커서 동기화 이벤트(SYNC/SHOW) |
+| MousePacket | 10B | 양방향 | 마우스 이동/클릭/스크롤(버튼 번호 포함, 사이드 버튼 지원), 커서 동기화 이벤트(SYNC/SHOW) |
 | KeyPacket | 11B | Host→Client | 키보드 입력, modifier 해제 |
 | HelloPacket | 64B | Client→Host | 인증 요청 + heartbeat |
 | AuthAckPacket | 34B | Host→Client | 인증 결과 응답 |
@@ -162,3 +164,15 @@ host→client 진입 비율에 -offset, client→host 복귀 비율에 +offset�
 - `TetherCore`는 C ABI(`extern "C"`)로 노출 → Swift에서 `import TetherCore`
 - `TetherManager`가 `TetherConfig` 조립 및 콜백 등록 담당
 - 상태 변경은 `TetherStatusCallback` → `DispatchQueue.main.async` → `@Published` 프로퍼티
+- 상태 콜백의 message 는 사람이 읽는 문구가 아니라 **안정적인 메시지 키**("connected",
+  "waiting_client" 등)다. Swift 가 `status.<키>` 로 현지화해 표시한다.
+- 상대 호스트명은 메시지에 싣지 않고 `tether_get_peer_hostname()` 로 조회한다.
+
+## 다국어 (i18n)
+
+- 문자열은 `Resources/<code>.lproj/Localizable.strings` 에 언어별로 둔다 (현재 en/ko).
+  새 언어 추가 = lproj 폴더 + `AppLanguage` case 하나.
+- `L10n`(ObservableObject) 이 선택 언어의 번들을 들고 `L("key")` 로 조회한다.
+  뷰가 `L10n.shared` 를 관찰하므로 설정 > 일반 > 언어 변경이 재시작 없이 즉시 반영된다.
+- 언어 설정: "시스템 기본"(OS 언어 따름) / English / 한국어. UserDefaults `appLanguage`.
+- 로그(TETHER_INFO 등)는 진단용이라 현지화하지 않고 UI 언어와 무관하게 영어로 통일한다.

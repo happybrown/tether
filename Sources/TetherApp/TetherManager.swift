@@ -8,7 +8,8 @@ class TetherManager: ObservableObject {
     static let shared = TetherManager()
 
     @Published var status: TetherStatus = .idle
-    @Published var statusMessage: String = "중지됨"
+    // C 코어가 보낸 메시지 키 (예: "connected"). 표시 문구는 statusMessageText 가 현지화한다.
+    @Published var statusMessage: String = "stopped"
     @Published var localIPs: [String] = []
     @Published var isRunning = false
     @Published var connectedHostname: String = ""
@@ -149,15 +150,10 @@ class TetherManager: ObservableObject {
                 manager.status = status
                 manager.statusMessage = message
                 manager.refreshClientScreenSize()
-                if status == TETHER_STATUS_CONNECTED && !message.isEmpty
-                    && message != "연결됨" && message != "재연결 중..." {
-                    // host: message에 클라이언트 호스트명이 담겨 있음
-                    manager.connectedHostname = message
-                    manager.authFailed = false
-                } else if status == TETHER_STATUS_AUTH_FAILED {
-                    manager.authFailed = true
-                    manager.connectedHostname = ""
-                }
+                // 상대 호스트명은 메시지가 아니라 전용 API 로 조회한다 (인증 시 C 코어가 보관).
+                // (C 함수 포인터 클로저라 dynamic Self 를 못 쓰므로 타입명을 명시한다)
+                manager.connectedHostname = TetherManager.peerHostname()
+                manager.authFailed = (status == TETHER_STATUS_AUTH_FAILED)
                 NotificationCenter.default.post(name: .tetherStatusChanged, object: nil)
             }
         }, selfPtr)
@@ -361,11 +357,18 @@ class TetherManager: ObservableObject {
         }
     }
 
+    /// 연결된 상대 Mac 의 호스트명을 C 코어에서 읽는다. 미연결이면 빈 문자열.
+    private static func peerHostname() -> String {
+        var buf = [CChar](repeating: 0, count: 64)
+        guard tether_get_peer_hostname(&buf, Int32(buf.count)) else { return "" }
+        return String(cString: buf)
+    }
+
     func stop() {
         stopClipboardPolling()
         isRunning = false
         status = .idle
-        statusMessage = "중지됨"
+        statusMessage = "stopped"
         connectedHostname = ""
         authFailed = false
         NotificationCenter.default.post(name: .tetherStatusChanged, object: nil)
@@ -383,7 +386,7 @@ class TetherManager: ObservableObject {
         stopClipboardPolling()
         isRunning = false
         status = .idle
-        statusMessage = "재시작 중..."
+        statusMessage = "restarting"
         connectedHostname = ""
         authFailed = false
         NotificationCenter.default.post(name: .tetherStatusChanged, object: nil)
@@ -398,14 +401,23 @@ class TetherManager: ObservableObject {
 
     var statusLabel: String {
         switch status {
-        case .idle:        return "중지됨"
-        case .waiting:     return statusMessage.isEmpty ? "대기 중" : statusMessage
-        case .connected:   return "연결됨"
-        case .remote:      return "원격 활성"
-        case .error:       return statusMessage
-        case .authFailed:  return "인증 실패"
-        default:           return "알 수 없음"
+        case .idle:        return L("status.stopped")
+        case .waiting:     return statusMessageText
+        case .connected:   return L("status.connected")
+        case .remote:      return L("status.remote")
+        case .error:       return statusMessageText
+        case .authFailed:  return L("status.auth_failed")
+        default:           return L("status.unknown")
         }
+    }
+
+    /// C 코어가 보낸 메시지 키("connected" 등)를 현지화한 문구.
+    /// 매핑에 없는 키는 그대로 보여준다 (새 키 누락 진단용).
+    var statusMessageText: String {
+        guard !statusMessage.isEmpty else { return L("status.waiting") }
+        let key = "status." + statusMessage
+        let localized = L(key)
+        return localized == key ? statusMessage : localized
     }
 
     var statusColor: Color {
@@ -489,11 +501,11 @@ struct NetPerfResult: Codable, Identifiable {
     /// 평균 RTT 기준 체감 등급. 마우스 원격 조작 기준.
     var grade: (label: String, color: Color) {
         switch avgMs {
-        case ..<5:   return ("아주 좋음", .green)
-        case ..<15:  return ("좋음", .green)
-        case ..<30:  return ("보통", .yellow)
-        case ..<60:  return ("느림", .orange)
-        default:     return ("매우 느림", .red)
+        case ..<5:   return (L("grade.excellent"), .green)
+        case ..<15:  return (L("grade.good"), .green)
+        case ..<30:  return (L("grade.fair"), .yellow)
+        case ..<60:  return (L("grade.slow"), .orange)
+        default:     return (L("grade.very_slow"), .red)
         }
     }
 }
@@ -517,8 +529,8 @@ struct DisplayInfo: Identifiable, Equatable {
 
     /// 사용자에게 보여줄 이름. 내장/주 화면을 구분해 어느 모니터인지 알기 쉽게 한다.
     var label: String {
-        if isBuiltin { return "맥북 화면" }
-        return isMain ? "주 모니터" : "외부 모니터"
+        if isBuiltin { return L("display.builtin") }
+        return isMain ? L("display.main") : L("display.external")
     }
 
     var resolutionText: String { "\(Int(frame.width)) × \(Int(frame.height))" }

@@ -4,13 +4,15 @@ import SwiftUI
 struct TetherApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject private var manager = TetherManager.shared
+    // 언어 변경 시 창 제목 등 Scene 수준 문자열이 다시 그려지도록 관찰한다.
+    @ObservedObject private var l10n = L10n.shared
 
     // 설정 창의 선택 탭. 메뉴바에서 "로그..." 를 누르면 로그 탭으로 열리도록 공유한다.
     @State private var settingsTab: SettingsTab = .connection
 
     var body: some Scene {
         // ── 설정 창 (로그 탭 포함) ────────────────────────────────
-        Window("tether 설정", id: SettingsWindow.id) {
+        Window(L("app.settings_title"), id: SettingsWindow.id) {
             SettingsView(selectedTab: $settingsTab)
         }
         .windowResizability(.contentMinSize)

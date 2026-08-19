@@ -13,8 +13,8 @@ enum LaunchAtLogin {
             }
         } catch {
             // 실패해도 앱 동작에 영향 없음 — 로그만 남긴다
-            NSLog("[LaunchAtLogin] %@ 실패: %@",
-                  enabled ? "등록" : "해제", error.localizedDescription)
+            NSLog("[LaunchAtLogin] %@ failed: %@",
+                  enabled ? "register" : "unregister", error.localizedDescription)
         }
     }
 }

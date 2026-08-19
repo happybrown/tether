@@ -38,7 +38,7 @@ struct MonitorLayoutView: View {
                         .position(x: h.rect.midX, y: h.rect.midY)
                 }
 
-                MonitorBox(title: "상대 Mac",
+                MonitorBox(title: L("layout.other_mac"),
                            caption: clientCaption,
                            tint: .accentColor,
                            selected: true,
@@ -52,7 +52,7 @@ struct MonitorLayoutView: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: triggerUUID)
         }
         .frame(height: canvasHeight)
-        .help("상대 Mac 사각형을 원하는 화면의 변에 끌어다 붙이세요")
+        .help(L("layout.drag_help"))
     }
 
     /// 실제로 적용되는 기준 화면. 자동(빈 값)일 때는 경계 방향의 최외곽 화면이 된다 —
@@ -82,7 +82,8 @@ struct MonitorLayoutView: View {
     }
 
     private var clientCaption: String {
-        clientResolution.map { "\(Int($0.width)) × \(Int($0.height))" } ?? "해상도 미상 (미연결)"
+        clientResolution.map { "\(Int($0.width)) × \(Int($0.height))" }
+            ?? L("layout.resolution_unknown")
     }
 
     // ── 배치 계산 ──────────────────────────────────────────────────

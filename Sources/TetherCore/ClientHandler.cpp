@@ -67,7 +67,7 @@ void client_apply_display_change() {
     g_client.screen = get_screen_bounds();
 
     TETHER_INFO(CAT_CURSOR,
-        "[클라이언트] 디스플레이 변경 감지 — 화면 재계산: (%.0f x %.0f) → (%.0f x %.0f)",
+        "[client] display change detected — recalculating screen: (%.0f x %.0f) → (%.0f x %.0f)",
         old_screen.width(), old_screen.height(),
         g_client.screen.width(), g_client.screen.height());
 
@@ -80,7 +80,7 @@ void client_apply_display_change() {
             client_show_cursor_onscreen();
             g_client.cursor_hidden = false;
         }
-        TETHER_INFO(CAT_CURSOR, "[클라이언트] 디스플레이 변경 — 원격 모드 로컬 복원");
+        TETHER_INFO(CAT_CURSOR, "[client] display change — restoring local from remote mode");
     }
 
     // 새 화면 크기를 host 에 재전송해 host 의 커서 예측이 올바른 해상도를 쓰게 한다.
@@ -123,7 +123,7 @@ void client_handle_sync(const MousePacket& pkt) {
     g_client.cursor_hidden = false;
 
     TETHER_INFO(CAT_CURSOR,
-        "[클라이언트] 커서 동기화 완료: 호스트 경계=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f), 화면영역=(%.0f, %.0f ~ %.0f, %.0f)",
+        "[client] cursor synced: host edge=%d, ratio=%.3f, entry=(%.0f, %.0f), screen=(%.0f, %.0f ~ %.0f, %.0f)",
         (int)host_edge, ratio, g_client.cur_x, g_client.cur_y,
         g_client.screen.left, g_client.screen.top,
         g_client.screen.right, g_client.screen.bottom);
@@ -177,7 +177,7 @@ static bool client_check_leave(int16_t dx, int16_t dy) {
     client_hide_cursor_offscreen();
     g_client.cursor_hidden = true;
 
-    TETHER_INFO(CAT_CURSOR, "[클라이언트] 반대편 경계 이탈 → 복귀 요청: edge=%d, 비율=%.3f",
+    TETHER_INFO(CAT_CURSOR, "[client] leaving opposite edge → requesting return: edge=%d, ratio=%.3f",
                g_client.entry_edge, ratio);
     return true;
 }
@@ -273,7 +273,7 @@ void client_handle_move(const MousePacket& pkt) {
     CFRelease(ev);
 
     if (is_click) {
-        TETHER_DEBUG(CAT_EVENT, "[클라이언트] 클릭 주입: type=%u pos=(%.0f,%.0f) clicks=%d",
+        TETHER_DEBUG(CAT_EVENT, "[client] click injected: type=%u pos=(%.0f,%.0f) clicks=%d",
                     (unsigned)etype, pos.x, pos.y, (int)pkt.dx);
     }
 }
@@ -303,7 +303,7 @@ static void client_reset_modifiers() {
         CGEventPost(kCGHIDEventTap, up);
         CFRelease(up);
     }
-    TETHER_INFO(CAT_EVENT, "[클라이언트] modifier 전체 해제 (복귀)");
+    TETHER_INFO(CAT_EVENT, "[client] all modifiers released (return)");
 }
 
 void client_handle_key(const KeyPacket& pkt) {

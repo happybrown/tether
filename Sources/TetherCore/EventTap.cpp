@@ -82,7 +82,7 @@ void refresh_layout(TetherEdge edge) {
     uint32_t count = 0;
     CGGetActiveDisplayList(16, ids, &count);
 
-    TETHER_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 레이아웃 새로고침: 디스플레이 수=%u, 경계 방향=%d", count, (int)edge);
+    TETHER_DEBUG(CAT_CURSOR, "[host] display layout refresh: displays=%u, edge=%d", count, (int)edge);
 
     // 디스플레이 rect 수집 + 기준 화면 인덱스 확인 (UUID 매칭)
     std::vector<CGRect> rects;
@@ -96,13 +96,13 @@ void refresh_layout(TetherEdge edge) {
             display_uuid(ids[i], u);
             if (strcmp(u, g_trigger_uuid) == 0) trigger_index = (int)i;
         }
-        TETHER_DEBUG(CAT_CURSOR, "[호스트] 디스플레이 %u: 위치=(%.0f, %.0f), 크기=(%.0f x %.0f)",
+        TETHER_DEBUG(CAT_CURSOR, "[host] display %u: origin=(%.0f, %.0f), size=(%.0f x %.0f)",
                     i, b.origin.x, b.origin.y, b.size.width, b.size.height);
     }
 
     if (g_trigger_uuid[0] != '\0' && trigger_index < 0) {
         TETHER_INFO(CAT_CURSOR,
-            "[호스트] 기준 화면(uuid=%s)을 찾지 못함 — 자동(최외곽 경계)으로 폴백", g_trigger_uuid);
+            "[host] trigger display (uuid=%s) not found — falling back to auto (outermost edge)", g_trigger_uuid);
     }
 
     g_layout.geo = compute_edge_geometry(rects.data(), rects.size(), edge, trigger_index);
@@ -112,15 +112,15 @@ void refresh_layout(TetherEdge edge) {
     // "근접 판정 구간인지 통과 판정 구간인지"를 바로 알 수 있다.
     if (g_layout.interior_edge()) {
         TETHER_INFO(CAT_CURSOR,
-            "[호스트] 레이아웃 갱신: 트리거 에지=%.0f, 인접 구간=%.0f~%.0f (이 구간은 통과 판정), "
-            "에지 화면 수=%zu, 전체 영역=(%.0f, %.0f ~ %.0f, %.0f)",
+            "[host] layout refresh: trigger edge=%.0f, neighbor range=%.0f~%.0f (crossing detection), "
+            "edge displays=%zu, desktop=(%.0f, %.0f ~ %.0f, %.0f)",
             g_layout.trigger_edge(), g_layout.geo.neighbor_lo, g_layout.geo.neighbor_hi,
             g_layout.geo.edge_displays.size(),
             g_layout.left(), g_layout.top(), g_layout.right(), g_layout.bottom());
     } else {
         TETHER_INFO(CAT_CURSOR,
-            "[호스트] 레이아웃 갱신: 트리거 에지=%.0f, 인접 화면 없음 (근접 판정), "
-            "에지 화면 수=%zu, 전체 영역=(%.0f, %.0f ~ %.0f, %.0f)",
+            "[host] layout refresh: trigger edge=%.0f, no neighbor displays (proximity detection), "
+            "edge displays=%zu, desktop=(%.0f, %.0f ~ %.0f, %.0f)",
             g_layout.trigger_edge(), g_layout.geo.edge_displays.size(),
             g_layout.left(), g_layout.top(), g_layout.right(), g_layout.bottom());
     }
@@ -280,7 +280,7 @@ static void sync_modifiers_on_enter() {
     }
 
     if (acc) {
-        TETHER_INFO(CAT_EVENT, "[호스트] 진입 시 modifier 동기화: flags=0x%llx",
+        TETHER_INFO(CAT_EVENT, "[host] modifier sync on enter: flags=0x%llx",
                     (unsigned long long)acc);
     }
 }
@@ -289,7 +289,7 @@ static void enter_remote(CGPoint loc) {
     // peer가 연결되어 있지 않으면 원격 모드 진입을 차단한다.
     // 연결 끊김 상태에서 경계 진입 시 먹통 방지.
     if (!g_engine || !g_engine->is_peer_known()) {
-        TETHER_DEBUG(CAT_CURSOR, "[호스트] 원격 모드 진입 차단: peer 미연결");
+        TETHER_DEBUG(CAT_CURSOR, "[host] remote mode entry blocked: peer not connected");
         return;
     }
 
@@ -358,15 +358,15 @@ static void enter_remote(CGPoint loc) {
     sync_modifiers_on_enter();
 
     TETHER_INFO(CAT_CURSOR,
-        "[호스트] 원격 모드 진입: edge=%d, 비율=%.3f, 진입좌표=(%.0f, %.0f)",
+        "[host] entered remote mode: edge=%d, ratio=%.3f, entry=(%.0f, %.0f)",
         (int)g_cfg.client_edge, ratio, loc.x, loc.y);
 
-    set_status(TETHER_STATUS_REMOTE, "원격 모드");
+    set_status(TETHER_STATUS_REMOTE, "remote");
 }
 
 static void leave_remote() {
     CGPoint rp = return_point();
-    TETHER_INFO(CAT_CURSOR, "[호스트] 원격 모드 종료: 복귀 위치=(%.0f, %.0f)", rp.x, rp.y);
+    TETHER_INFO(CAT_CURSOR, "[host] left remote mode: return position=(%.0f, %.0f)", rp.x, rp.y);
 
     // 복귀 warp 직후의 suppression(~250ms)이 커서를 경계에 멈춰 세우지 않도록
     // 복귀 순간에만 0 으로 낮춘다 (빠른 복귀 시 유실 거리가 커져 끊김이 뚜렷해진다).
@@ -403,7 +403,7 @@ static void leave_remote() {
     kp.event_type = EVENT_RESET_MODIFIERS;
     for (int i = 0; i < 3; ++i) g_engine->send_key(kp);
 
-    set_status(TETHER_STATUS_CONNECTED, "연결됨");
+    set_status(TETHER_STATUS_CONNECTED, "connected");
 }
 
 /// host 가 client 가상 커서 위치를 delta 로 누적/clamp 하고, 반대편 경계로 이탈하려는지
@@ -454,7 +454,7 @@ static bool host_predict_leave(int16_t dx, int16_t dy) {
     }
 
     set_return_from_ratio(std::clamp(ratio, 0.0, 1.0));
-    TETHER_INFO(CAT_CURSOR, "[호스트] 자체 복귀 예측: 비율=%.3f", ratio);
+    TETHER_INFO(CAT_CURSOR, "[host] predicted return to local: ratio=%.3f", ratio);
     leave_remote();
     return true;
 }
@@ -465,7 +465,7 @@ static bool host_predict_leave(int16_t dx, int16_t dy) {
 static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
     if (type == kCGEventTapDisabledByTimeout ||
         type == kCGEventTapDisabledByUserInput) {
-        TETHER_ERROR(CAT_EVENT, "[호스트] 마우스 tap 비활성화 감지 (%u) — 재활성화", (unsigned)type);
+        TETHER_ERROR(CAT_EVENT, "[host] mouse tap disabled (%u) — re-enabling", (unsigned)type);
         CGEventTapEnable(g_mouse_tap, true);
         return event;
     }
@@ -520,7 +520,7 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     }
 
     if (is_click) {
-        TETHER_DEBUG(CAT_EVENT, "[호스트] 클릭 전송: type=%u entry_guard=%d", (unsigned)type, g_remote.entry_guard);
+        TETHER_DEBUG(CAT_EVENT, "[host] sending click: type=%u entry_guard=%d", (unsigned)type, g_remote.entry_guard);
     }
 
     // 진입 직후 몇 이벤트는 host 잔여 delta 이므로 client 로 보내지 않는다.
@@ -601,18 +601,18 @@ void set_force_stop_cb(std::function<void()> cb) {
 static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRef event, void*) {
     if (type == kCGEventTapDisabledByTimeout ||
         type == kCGEventTapDisabledByUserInput) {
-        TETHER_ERROR(CAT_EVENT, "[호스트] 키보드 tap 비활성화 감지 (%u) — 재활성화", (unsigned)type);
+        TETHER_ERROR(CAT_EVENT, "[host] keyboard tap disabled (%u) — re-enabling", (unsigned)type);
         CGEventTapEnable(g_key_tap, true);
         return event;
     }
     bool stop_session = false;
     if (is_escape_shortcut(type, event, &stop_session)) {
         if (stop_session) {
-            TETHER_INFO(CAT_CURSOR, "[호스트] Cmd+Shift+Esc — 세션 강제 중지");
+            TETHER_INFO(CAT_CURSOR, "[host] Cmd+Shift+Esc — force stopping session");
             if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
             if (g_force_stop_cb) g_force_stop_cb();
         } else {
-            TETHER_INFO(CAT_CURSOR, "[호스트] Cmd+Esc — 강제 로컬 복귀");
+            TETHER_INFO(CAT_CURSOR, "[host] Cmd+Esc — forced return to local");
             if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
         }
         return NULL;
@@ -641,11 +641,11 @@ static void display_reconfiguration_callback(CGDirectDisplayID display,
     // kCGDisplayMovedFlag / kCGDisplaySetMainFlag: 배치 변경
     if (flags & (kCGDisplayAddFlag | kCGDisplayRemoveFlag |
                  kCGDisplayMovedFlag | kCGDisplaySetMainFlag)) {
-        TETHER_INFO(CAT_CURSOR, "[호스트] 디스플레이 재설정 감지 (display=%u, flags=0x%x) — 레이아웃 갱신",
+        TETHER_INFO(CAT_CURSOR, "[host] display reconfiguration detected (display=%u, flags=0x%x) — refreshing layout",
                    display, flags);
         // 원격 모드 중이면 먼저 복귀 — 경계가 바뀌면 기존 가상 좌표가 무의미
         if (g_remote.active.load(std::memory_order_acquire)) {
-            force_leave_remote("디스플레이 재설정");
+            force_leave_remote("display reconfiguration");
         }
         refresh_layout(g_cfg.client_edge);
     }
@@ -654,7 +654,7 @@ static void display_reconfiguration_callback(CGDirectDisplayID display,
 // ── RunLoop 기반 이벤트 탭 설정/해제 ─────────────────────────────────
 
 void setup_event_taps() {
-    TETHER_DEBUG(CAT_EVENT, "[호스트] 이벤트 탭 설정 시작");
+    TETHER_DEBUG(CAT_EVENT, "[host] setting up event taps");
 
     CGEventMask mouse_mask = CGEventMaskBit(kCGEventMouseMoved)         |
                              CGEventMaskBit(kCGEventLeftMouseDragged)   |
@@ -680,9 +680,9 @@ void setup_event_taps() {
                                  key_mask, keyboard_callback, nullptr);
 
     if (!g_mouse_tap || !g_key_tap) {
-        TETHER_ERROR(CAT_EVENT, "[호스트] 이벤트 탭 생성 실패: 마우스 탭=%p, 키 탭=%p",
+        TETHER_ERROR(CAT_EVENT, "[host] event tap creation failed: mouse tap=%p, key tap=%p",
                     g_mouse_tap, g_key_tap);
-        set_status(TETHER_STATUS_ERROR, "Event Tap 권한 필요 (손쉬운 사용)");
+        set_status(TETHER_STATUS_ERROR, "accessibility_required");
         return;
     }
 
@@ -699,7 +699,7 @@ void setup_event_taps() {
     CGDisplayRegisterReconfigurationCallback(display_reconfiguration_callback, nullptr);
 
     g_taps_active.store(true, std::memory_order_release);
-    TETHER_INFO(CAT_EVENT, "[호스트] 이벤트 탭 설정 완료");
+    TETHER_INFO(CAT_EVENT, "[host] event taps ready");
 }
 
 void teardown_event_taps() {
@@ -723,7 +723,7 @@ void force_leave_remote(const char* reason) {
     CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
     if (!rl || rl == (CFRunLoopRef)-1) {
         // RunLoop 이 없거나 setup 실패 — 최대한 복구 시도
-        TETHER_ERROR(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 폴백 (%s): RunLoop 없음", reason ? reason : "");
+        TETHER_ERROR(CAT_CURSOR, "[host] force-leave remote fallback (%s): no RunLoop", reason ? reason : "");
         CGAssociateMouseAndMouseCursorPosition(true);
         tether_show_cursor();
         g_remote.return_time = std::chrono::steady_clock::now();
@@ -737,7 +737,7 @@ void force_leave_remote(const char* reason) {
         return;
     }
 
-    TETHER_INFO(CAT_CURSOR, "[호스트] 원격 모드 강제 종료 요청: %s", reason ? reason : "");
+    TETHER_INFO(CAT_CURSOR, "[host] force-leave remote requested: %s", reason ? reason : "");
     CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{
         if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
     });
@@ -751,7 +751,7 @@ void request_leave_remote(double ratio) {
     if (!g_remote.active.load(std::memory_order_acquire)) return;
 
     CFRunLoopRef rl = g_run_loop.load(std::memory_order_acquire);
-    if (!rl || rl == (CFRunLoopRef)-1) { force_leave_remote("복귀 요청(RunLoop 없음)"); return; }
+    if (!rl || rl == (CFRunLoopRef)-1) { force_leave_remote("return to local request (no RunLoop)"); return; }
 
     // 복귀 좌표 계산과 leave_remote 를 RunLoop 스레드에서 수행해 g_layout/커서 접근을 일원화한다.
     CFRunLoopPerformBlock(rl, kCFRunLoopCommonModes, ^{

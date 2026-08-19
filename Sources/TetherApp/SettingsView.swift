@@ -15,11 +15,11 @@ enum SettingsTab: Hashable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .connection:  return "연결"
-        case .control:     return "제어"
-        case .diagnostics: return "진단"
-        case .general:     return "일반"
-        case .logs:        return "로그"
+        case .connection:  return L("tab.connection")
+        case .control:     return L("tab.control")
+        case .diagnostics: return L("tab.diagnostics")
+        case .general:     return L("tab.general")
+        case .logs:        return L("tab.logs")
         }
     }
 
@@ -54,6 +54,8 @@ enum SettingsTab: Hashable, CaseIterable, Identifiable {
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var manager  = TetherManager.shared
+    // 언어 변경 시 즉시 다시 그려지도록 관찰한다 (일반 탭의 언어 선택도 여기 바인딩).
+    @ObservedObject private var l10n     = L10n.shared
 
     /// 외부(메뉴바)에서 특정 탭을 선택해 열 수 있도록 바인딩으로 받는다.
     @Binding var selectedTab: SettingsTab
@@ -140,6 +142,9 @@ struct SettingsView: View {
             }
         }
         .listStyle(.sidebar)
+        // List 는 행 뷰를 캐싱해 전역 상태(언어)만 바뀌면 라벨을 다시 그리지 않는다.
+        // 언어를 identity 로 걸어 언어 변경 시 사이드바를 강제로 재구성한다.
+        .id(l10n.language)
     }
 
     // ── 선택 탭 콘텐츠 ────────────────────────────────────────────
@@ -178,12 +183,12 @@ struct SettingsView: View {
 
                 if manager.isRunning {
                     Button(role: .destructive) { manager.stop() } label: {
-                        Label("중지", systemImage: "stop.fill")
+                        Label(L("common.stop"), systemImage: "stop.fill")
                     }
                     .keyboardShortcut(.escape, modifiers: [])
                 } else {
                     Button { manager.start() } label: {
-                        Label("시작", systemImage: "play.fill")
+                        Label(L("common.start"), systemImage: "play.fill")
                     }
                     .keyboardShortcut(.return, modifiers: [])
                     .buttonStyle(.borderedProminent)
@@ -247,9 +252,9 @@ struct SettingsView: View {
     // ── 모드 ──────────────────────────────────────────────────────
 
     private var modeSection: some View {
-        FormSection(title: "모드", icon: "person.2") {
+        FormSection(title: L("settings.mode_section"), icon: "person.2") {
             VStack(spacing: 0) {
-                FormRow(label: "역할") {
+                FormRow(label: L("settings.role")) {
                     Picker("", selection: $settings.mode) {
                         ForEach(AppMode.allCases) { Text($0.label).tag($0) }
                     }
@@ -262,7 +267,7 @@ struct SettingsView: View {
                     Divider().padding(.leading, 16)
                     HStack(spacing: 6) {
                         Image(systemName: "lock.fill").font(.system(size: 10))
-                        Text("실행 중에는 모드를 변경할 수 없습니다")
+                        Text(L("settings.mode_locked"))
                             .font(.system(size: 11))
                     }
                     .foregroundStyle(.secondary)
@@ -283,17 +288,17 @@ struct SettingsView: View {
                 .font(.system(size: 20))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
-                Text("손쉬운 사용 권한 필요")
+                Text(L("permission.title"))
                     .font(.system(size: 13, weight: .semibold))
                 Text(settings.mode == .host
-                     ? "Host 모드는 키보드·마우스 이벤트를 가로채기 위해 시스템 권한이 필요합니다."
-                     : "Client 모드는 원격 클릭·키 입력을 주입하기 위해 시스템 권한이 필요합니다.")
+                     ? L("permission.host_hint_settings")
+                     : L("permission.client_hint_settings"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Button("시스템 설정 열기") { manager.openAccessibilitySettings() }
+            Button(L("permission.open_settings")) { manager.openAccessibilitySettings() }
                 .controlSize(.small)
         }
         .padding(14)
@@ -305,13 +310,14 @@ struct SettingsView: View {
     // ── 연결 설정 ─────────────────────────────────────────────────
 
     private var connectionSection: some View {
-        FormSection(title: settings.mode == .host ? "Host 설정" : "Client 설정",
+        FormSection(title: settings.mode == .host ? L("settings.host_section")
+                                                  : L("settings.client_section"),
                     icon: settings.mode == .host ? "desktopcomputer" : "laptopcomputer") {
             if settings.mode == .host {
-                FormRow(label: "내 IP 주소") {
+                FormRow(label: L("settings.my_ip")) {
                     VStack(alignment: .trailing, spacing: 2) {
                         if manager.localIPs.isEmpty {
-                            Text("없음").foregroundStyle(.secondary)
+                            Text(L("common.none")).foregroundStyle(.secondary)
                                 .font(.system(.body, design: .monospaced))
                         } else {
                             ForEach(manager.localIPs, id: \.self) { ip in
@@ -322,9 +328,9 @@ struct SettingsView: View {
                     }
                 }
             } else {
-                FormRow(label: "Host IP") {
+                FormRow(label: L("settings.host_ip")) {
                     VStack(alignment: .trailing, spacing: 4) {
-                        TextField("예: 192.168.0.10", text: $hostIPString)
+                        TextField(L("settings.host_ip_placeholder"), text: $hostIPString)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 200)
                             .onSubmit { applyConnectionSettings() }
@@ -340,7 +346,7 @@ struct SettingsView: View {
     // ── 모니터 배치 (제어 탭) ──────────────────────────────────────
 
     private var layoutSection: some View {
-        FormSection(title: "모니터 배치", icon: "display.2") {
+        FormSection(title: L("settings.layout_section"), icon: "display.2") {
             VStack(alignment: .leading, spacing: 10) {
                 // host 의 모든 디스플레이를 실제 배치대로 그리고, 상대 Mac 을 원하는
                 // 화면의 변에 붙여 기준 화면·방향·오프셋을 한 번에 지정한다.
@@ -357,16 +363,16 @@ struct SettingsView: View {
                 .onChange(of: settings.triggerDisplayUUID) { manager.updateTriggerDisplay($0) }
 
                 HStack(spacing: 8) {
-                    Text("전환 기준")
+                    Text(L("settings.trigger_label"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                     Text("\(triggerDisplayLabel) \(settings.clientEdge.label)")
                         .font(.system(size: 11, weight: .medium))
-                    Text(String(format: "오프셋 %+d%%", Int((settings.clientOffset * 100).rounded())))
+                    Text(L("settings.offset_format", Int((settings.clientOffset * 100).rounded())))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("초기화") {
+                    Button(L("common.reset")) {
                         settings.clientOffset = 0
                         settings.triggerDisplayUUID = ""
                     }
@@ -375,8 +381,8 @@ struct SettingsView: View {
                     .disabled(settings.clientOffset == 0 && settings.triggerDisplayUUID.isEmpty)
                 }
                 Text(manager.displays.count > 1
-                     ? "상대 Mac 사각형을 원하는 화면의 변에 끌어다 붙이세요. 그 화면의 그 방향에서만 전환됩니다."
-                     : "상대 Mac 사각형을 끌어 배치하세요. 위아래(또는 좌우)로 어긋나면 경계 방향으로 끌어 보정합니다.")
+                     ? L("settings.layout_hint_multi")
+                     : L("settings.layout_hint_single"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -389,14 +395,14 @@ struct SettingsView: View {
     // ── 커서 동작 (제어 탭) ────────────────────────────────────────
 
     private var behaviorSection: some View {
-        FormSection(title: "커서 동작", icon: "cursorarrow") {
-            FormRow(label: "원격 복귀 예측") {
+        FormSection(title: L("settings.cursor_section"), icon: "cursorarrow") {
+            FormRow(label: L("settings.predict_leave")) {
                 VStack(alignment: .trailing, spacing: 4) {
                     Toggle("", isOn: $settings.predictLeave)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: settings.predictLeave) { manager.updatePredictLeave($0) }
-                    Text("반대편 경계 이탈을 Host 가 직접 예측해 지연 없이 복귀합니다.\n끄면 Client 신호로만 복귀합니다(약간 느리지만 오탐 없음).")
+                    Text(L("settings.predict_leave_hint"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
@@ -412,9 +418,9 @@ struct SettingsView: View {
 
     /// 현재 전환 기준 화면의 표시 이름. 지정 없으면 자동 모드임을 알린다.
     private var triggerDisplayLabel: String {
-        if settings.triggerDisplayUUID.isEmpty { return "전체 화면 바깥쪽" }
+        if settings.triggerDisplayUUID.isEmpty { return L("settings.trigger_auto") }
         return manager.displays.first { $0.uuid == settings.triggerDisplayUUID }?.label
-            ?? "연결 안 된 화면"
+            ?? L("settings.trigger_disconnected")
     }
 
     @ViewBuilder
@@ -425,14 +431,14 @@ struct SettingsView: View {
                     .foregroundStyle(.orange)
                     .font(.system(size: 12))
                 Text(manager.isRunning
-                     ? "미저장 변경 — 적용 시 재연결됩니다"
-                     : "미저장 변경")
+                     ? L("settings.dirty_running")
+                     : L("settings.dirty"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("되돌리기") { syncEditFields() }
+                Button(L("settings.revert")) { syncEditFields() }
                     .controlSize(.small)
-                Button("적용") { applyConnectionSettings() }
+                Button(L("settings.apply")) { applyConnectionSettings() }
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: [.command])
@@ -448,16 +454,16 @@ struct SettingsView: View {
     // ── 네트워크 ──────────────────────────────────────────────────
 
     private var networkSection: some View {
-        FormSection(title: "네트워크", icon: "network") {
+        FormSection(title: L("settings.network_section"), icon: "network") {
             VStack(spacing: 0) {
-                FormRow(label: "포트") {
+                FormRow(label: L("common.port")) {
                     VStack(alignment: .trailing, spacing: 4) {
                         HStack(spacing: 8) {
                             TextField("24900", text: $portString)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 80)
                                 .onSubmit { applyConnectionSettings() }
-                            Text("기본값 24900")
+                            Text(L("settings.port_default"))
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
                         }
@@ -468,18 +474,18 @@ struct SettingsView: View {
                 }
                 if settings.mode == .client {
                     Divider().padding(.leading, 16)
-                    FormRow(label: "연결 확인 간격") {
+                    FormRow(label: L("settings.ping_interval")) {
                         VStack(alignment: .trailing, spacing: 4) {
                             Picker("", selection: $settings.reconnectInterval) {
-                                Text("5초").tag(5)
-                                Text("10초").tag(10)
-                                Text("30초").tag(30)
+                                Text(L("settings.seconds_format", 5)).tag(5)
+                                Text(L("settings.seconds_format", 10)).tag(10)
+                                Text(L("settings.seconds_format", 30)).tag(30)
                             }
                             .pickerStyle(.segmented)
                             .frame(width: 180)
                             .labelsHidden()
                             .onChange(of: settings.reconnectInterval) { _ in restartIfRunning() }
-                            Text("Host 와의 연결 유지를 위한 PING 주기")
+                            Text(L("settings.ping_interval_hint"))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                         }
@@ -492,14 +498,14 @@ struct SettingsView: View {
     // ── 보안 ──────────────────────────────────────────────────────
 
     private var securitySection: some View {
-        FormSection(title: "보안", icon: "lock") {
-            FormRow(label: "공유 암호") {
+        FormSection(title: L("settings.security_section"), icon: "lock") {
+            FormRow(label: L("settings.psk")) {
                 VStack(alignment: .trailing, spacing: 4) {
-                    SecureField("비어있으면 인증 없음", text: $pskString)
+                    SecureField(L("settings.psk_placeholder"), text: $pskString)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 200)
                         .onSubmit { applyConnectionSettings() }
-                    Text("양쪽 Mac 에 동일한 값을 입력하세요")
+                    Text(L("settings.psk_hint"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
@@ -510,11 +516,23 @@ struct SettingsView: View {
     // ── 일반 ──────────────────────────────────────────────────────
 
     private var generalSection: some View {
-        FormSection(title: "일반", icon: "slider.horizontal.3") {
+        FormSection(title: L("settings.general_section"), icon: "slider.horizontal.3") {
             VStack(spacing: 0) {
+                // 언어 선택 — 변경 즉시 UI 전체에 반영된다 (재시작 불필요).
+                FormRow(label: L("settings.language")) {
+                    Picker("", selection: $l10n.language) {
+                        ForEach(AppLanguage.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 160)
+                    .labelsHidden()
+                }
+
+                Divider().padding(.leading, 16)
+
                 FormToggleRow(
-                    label: "로그인 시 자동 실행",
-                    description: "Mac 에 로그인할 때 tether 을 자동으로 실행합니다",
+                    label: L("settings.launch_at_login"),
+                    description: L("settings.launch_at_login_hint"),
                     isOn: $settings.launchAtLogin
                 )
                 .onChange(of: settings.launchAtLogin) { LaunchAtLogin.setEnabled($0) }
@@ -522,8 +540,8 @@ struct SettingsView: View {
                 Divider().padding(.leading, 16)
 
                 FormToggleRow(
-                    label: "앱 실행 시 자동 연결",
-                    description: "앱이 시작되면 저장된 설정으로 세션을 바로 시작합니다",
+                    label: L("settings.auto_start"),
+                    description: L("settings.auto_start_hint"),
                     isOn: $settings.autoStart
                 )
             }
@@ -533,18 +551,18 @@ struct SettingsView: View {
     // ── 단축키 ────────────────────────────────────────────────────
 
     private var shortcutSection: some View {
-        FormSection(title: "단축키", icon: "keyboard") {
+        FormSection(title: L("settings.shortcut_section"), icon: "keyboard") {
             VStack(spacing: 0) {
                 ShortcutRow(
                     keys: ["⌘", "Esc"],
-                    label: "로컬 강제 복귀",
-                    description: "원격 모드에서 호스트로 즉시 복귀합니다"
+                    label: L("settings.shortcut_force_local"),
+                    description: L("settings.shortcut_force_local_hint")
                 )
                 Divider().padding(.leading, 16)
                 ShortcutRow(
                     keys: ["⌘", "⇧", "Esc"],
-                    label: "세션 강제 중지",
-                    description: "완전히 먹통이 됐을 때 세션 전체를 종료합니다"
+                    label: L("settings.shortcut_force_stop"),
+                    description: L("settings.shortcut_force_stop_hint")
                 )
             }
         }
@@ -553,8 +571,8 @@ struct SettingsView: View {
     // ── 앱 정보 ────────────────────────────────────────────────────
 
     private var aboutSection: some View {
-        FormSection(title: "정보", icon: "info.circle") {
-            FormRow(label: "버전") {
+        FormSection(title: L("settings.about_section"), icon: "info.circle") {
+            FormRow(label: L("settings.version")) {
                 Text(manager.appVersion)
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -593,7 +611,7 @@ struct SettingsView: View {
         // 1) Port 검증
         let portTrim = portString.trimmingCharacters(in: .whitespaces)
         guard let portValue = Int(portTrim), (1...65535).contains(portValue) else {
-            portError = "1~65535 범위의 숫자를 입력하세요"
+            portError = L("settings.port_error")
             return
         }
         portError = nil
@@ -604,11 +622,11 @@ struct SettingsView: View {
         let ipTrim = hostIPString.trimmingCharacters(in: .whitespaces)
         if settings.mode == .client {
             if ipTrim.isEmpty {
-                hostIPError = "Host IP 를 입력하세요"
+                hostIPError = L("settings.host_ip_required")
                 return
             }
             if !Self.isValidIPv4(ipTrim) {
-                hostIPError = "올바른 IPv4 주소를 입력하세요 (예: 192.168.0.10)"
+                hostIPError = L("settings.host_ip_invalid")
                 return
             }
         }

@@ -24,9 +24,9 @@ struct NetPerfChartView: View {
             ForEach(indexed, id: \.r.id) { item in
                 // 최소~최대 밴드
                 AreaMark(
-                    x: .value("측정", item.idx),
-                    yStart: .value("최소", item.r.minMs),
-                    yEnd: .value("최대", item.r.maxMs)
+                    x: .value(L("netperf.chart_index"), item.idx),
+                    yStart: .value(L("netperf.min"), item.r.minMs),
+                    yEnd: .value(L("netperf.max"), item.r.maxMs)
                 )
                 .foregroundStyle(bandColor)
                 .interpolationMethod(.monotone)
@@ -35,8 +35,8 @@ struct NetPerfChartView: View {
             ForEach(indexed, id: \.r.id) { item in
                 // 평균 RTT 선
                 LineMark(
-                    x: .value("측정", item.idx),
-                    y: .value("평균 RTT", item.r.avgMs)
+                    x: .value(L("netperf.chart_index"), item.idx),
+                    y: .value(L("netperf.avg_rtt"), item.r.avgMs)
                 )
                 .foregroundStyle(lineColor)
                 .lineStyle(StrokeStyle(lineWidth: 2))
@@ -46,8 +46,8 @@ struct NetPerfChartView: View {
             // 최신 값만 점 + 직접 라벨 (모든 점에 라벨 금지 원칙)
             if let last = indexed.last {
                 PointMark(
-                    x: .value("측정", last.idx),
-                    y: .value("평균 RTT", last.r.avgMs)
+                    x: .value(L("netperf.chart_index"), last.idx),
+                    y: .value(L("netperf.avg_rtt"), last.r.avgMs)
                 )
                 .foregroundStyle(lineColor)
                 .symbolSize(60)
