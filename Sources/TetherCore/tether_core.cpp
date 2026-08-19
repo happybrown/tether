@@ -78,10 +78,6 @@ static std::thread       g_ping_thread;
 static std::atomic<bool> g_ping_running{false};
 static uint16_t          g_reconnect_interval_s = 5;
 
-// host: 자체 복귀 예측 사용 여부. EventTap 콜백(다른 스레드)에서 읽으므로 atomic.
-// 기본 false. 끄면 client LeavePacket 안전망으로만 복귀한다(지연 있으나 오탐 없음).
-std::atomic<bool>        g_predict_leave{false};
-
 // ── 네트워크 성능(RTT) 측정 상태 ──────────────────────────────────────
 // probe 요청을 보낸 seq 별 송신 시각을 기록해두고, 응답(is_ack=1) 수신 시 왕복을 잰다.
 // 측정 스레드와 recv 스레드(probe 콜백)가 공유하므로 mutex 로 보호한다.
@@ -260,7 +256,6 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     g_hostname[sizeof(g_hostname) - 1] = '\0';
     g_auth_ok.store(false, std::memory_order_release);
     g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
-    g_predict_leave.store(g_cfg.predict_leave, std::memory_order_relaxed);
     g_client_offset.store(std::clamp(g_cfg.client_offset, -1.0, 1.0), std::memory_order_relaxed);
     g_client_size_known.store(false, std::memory_order_release);
     // 원격 모드 빠른 복귀 타임아웃: PING 주기의 2배(최소 10초). PING 1회 유실로 복귀 방지.
@@ -287,10 +282,10 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             // host는 client로부터 마우스 패킷을 수신하지 않음 (복귀는 LeavePacket 전용)
         };
 
-        // host: 클라이언트 복귀 요청 수신 (host 자체 예측이 주 경로, 이건 안전망)
+        // host: 클라이언트 복귀 요청 수신 — 원격 복귀의 정규 경로
         auto on_leave = [](const LeavePacket& pkt) {
             double ratio = static_cast<double>(pkt.ratio) / 32767.0;
-            TETHER_INFO(CAT_CURSOR, "[host] client return-to-local request received (safety net): ratio=%.3f", ratio);
+            TETHER_INFO(CAT_CURSOR, "[host] client return-to-local request received: ratio=%.3f", ratio);
             request_leave_remote(ratio);
         };
 
@@ -796,13 +791,6 @@ void tether_set_client_edge(TetherEdge edge) {
     apply_client_edge(edge);
 }
 
-void tether_set_predict_leave(bool enabled) {
-    // 실행 여부와 무관하게 플래그를 갱신한다. 실행 전 설정은 tether_start 가 config 로
-    // 덮어쓰지만, 실행 중 토글은 재시작 없이 다음 이동 이벤트부터 즉시 반영된다.
-    g_predict_leave.store(enabled, std::memory_order_relaxed);
-    g_cfg.predict_leave = enabled;  // 이후 재시작 시에도 유지
-}
-
 void tether_set_trigger_display(const char* uuid) {
     // 실행 전에도 값을 보관해 다음 start 에 반영되게 한다 (client 모드에선 의미 없음).
     strncpy(g_cfg.trigger_display_uuid, uuid ? uuid : "",
@@ -851,7 +839,7 @@ bool tether_get_client_size(int32_t* width, int32_t* height) {
 }
 
 void tether_set_client_offset(double offset) {
-    // predict_leave 와 같은 방식의 실시간 갱신. 값 하나만 바꾸므로 RunLoop 위임이 필요 없고,
+    // 값 하나만 바꾸는 실시간 갱신이라 RunLoop 위임이 필요 없고,
     // 다음 진입/복귀 비율 계산부터 즉시 반영된다.
     double clamped = std::clamp(offset, -1.0, 1.0);
     g_client_offset.store(clamped, std::memory_order_relaxed);

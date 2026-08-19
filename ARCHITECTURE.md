@@ -77,9 +77,8 @@ Host:   set_peer() 호출 전까지 send 불가 (peer_known=false)
 - `EVENT_SYNC_CURSOR`: 진입 위치 비율(ratio) + 방향(edge) 전달
 - Client: 비율을 자신의 화면 크기에 매핑해 커서 워프. 이동뿐 아니라 **클릭에도**
   커서를 warp한 뒤 이벤트를 주입한다 (위치 불일치로 클릭이 무시되는 것 방지).
-- 복귀 판정: Host가 client 가상 커서 위치를 delta로 누적해 반대편 경계 도달을
-  직접 예측한다 (`host_predict_leave`, 왕복 지연 없음). 큰 delta 한 방의 오탐을 막기 위해
-  "직전 실제 위치가 경계 margin 안"일 때만 이탈로 인정한다. Client의 LeavePacket은 안전망.
+- 복귀 판정: 실제 커서 위치를 아는 Client가 반대편 경계 이탈을 감지해
+  LeavePacket(복귀 비율)으로 요청한다 (`request_leave_remote`).
 - Host 커서가 복귀 → `EVENT_SHOW_CURSOR` → Client 커서 숨김
 
 ### 유실 대비 상태 동기화
@@ -154,7 +153,7 @@ host→client 진입 비율에 -offset, client→host 복귀 비율에 +offset�
 | HelloPacket | 64B | Client→Host | 인증 요청 + heartbeat |
 | AuthAckPacket | 34B | Host→Client | 인증 결과 응답 |
 | ClientInfoPacket | 9B | Client→Host | 클라이언트 화면 크기 (너비/높이) |
-| LeavePacket | 8B | Client→Host | 반대편 경계 이탈 복귀 요청 (비율, 안전망) |
+| LeavePacket | 8B | Client→Host | 반대편 경계 이탈 복귀 요청 (비율) |
 | ProbePacket | 12B | 양방향 | 네트워크 성능(RTT) 측정 |
 | PING/PONG | 1B / 2B | 상호 | 연결 생존 확인. PONG 2번째 바이트 = host 원격 활성 상태 |
 | Clipboard | 가변 | 양방향 | 클립보드 텍스트/이미지(PNG), 첫 바이트=형식 (MTU 안전 청크, 최대 8MB) |

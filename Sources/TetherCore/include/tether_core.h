@@ -29,7 +29,6 @@ typedef struct {
     TetherEdge client_edge;  // client가 host 기준 어느 방향에 있는지
     char      psk[128];     // 공유 암호 (빈 문자열이면 인증 없음)
     uint16_t  reconnect_interval_s; // client: PING/HELLO 재전송 간격(초), 0이면 기본값(5초)
-    bool      predict_leave; // host: 자체 복귀 예측 사용 여부 (false면 LeavePacket 안전망만)
     // host: client 화면 정렬 오프셋 (-1.0 ~ +1.0, client 화면 크기 대비 비율).
     // 경계와 평행한 축 기준으로 client 화면이 host 보다 아래/오른쪽에 있으면 양수.
     // 해상도 차이 등으로 전환 위치가 어긋날 때 미세조정한다.
@@ -97,10 +96,6 @@ void tether_force_local(void);
 // 실행 중에도 세션 재시작 없이 커서 전환 경계를 즉시 갱신한다.
 // 실행 전에 호출하면 다음 tether_start 에 반영된다.
 void tether_set_client_edge(TetherEdge edge);
-
-// host 자체 복귀 예측 사용 여부를 실시간으로 변경한다 (host 모드 전용).
-// 끄면 client 의 LeavePacket 안전망으로만 복귀한다(왕복 지연 있음, 오탐 없음).
-void tether_set_predict_leave(bool enabled);
 
 // client 화면 정렬 오프셋을 실시간으로 변경한다 (host 모드 전용).
 // 범위 밖 값은 -1.0 ~ +1.0 으로 clamp 되며, 다음 진입/복귀부터 즉시 반영된다.

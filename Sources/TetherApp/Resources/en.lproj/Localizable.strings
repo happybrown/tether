@@ -98,10 +98,6 @@
 "settings.layout_hint_multi" = "Drag the other Mac's box onto the edge of the screen you want. Switching happens only on that edge of that screen.";
 "settings.layout_hint_single" = "Drag the other Mac's box to position it. If the switch point feels misaligned, drag along the edge to adjust.";
 
-"settings.cursor_section" = "Cursor Behavior";
-"settings.predict_leave" = "Predictive Return";
-"settings.predict_leave_hint" = "The Host predicts when the cursor leaves the far edge and returns without delay.\nWhen off, return relies on the Client's signal (slightly slower, no false positives).";
-
 "settings.dirty" = "Unsaved changes";
 "settings.dirty_running" = "Unsaved changes — applying will reconnect";
 "settings.revert" = "Revert";

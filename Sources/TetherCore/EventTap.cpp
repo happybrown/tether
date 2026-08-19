@@ -21,13 +21,10 @@ extern TetherConfig              g_cfg;
 extern NetworkEngine*           g_engine;
 extern CFMachPortRef            g_mouse_tap;
 extern CFMachPortRef            g_key_tap;
-extern std::atomic<int32_t>     g_client_width;
-extern std::atomic<int32_t>     g_client_height;
 extern std::atomic<double>      g_client_offset;  // client 화면 정렬 오프셋 (비율)
 extern RemoteState              g_remote;
 extern std::atomic<CFRunLoopRef> g_run_loop;
 extern std::atomic<bool>        g_taps_active;
-extern std::atomic<bool>        g_predict_leave;  // host 자체 복귀 예측 on/off
 
 void set_status(TetherStatus s, const char* msg);
 
@@ -330,21 +327,10 @@ static void enter_remote(CGPoint loc) {
     }
 
     // 정렬 오프셋 적용: client 화면이 host 보다 아래/오른쪽에 있으면(양수) host 의 같은
-    // 위치가 client 화면에서는 그만큼 위/왼쪽에 대응한다. client 로 보내는 비율과
-    // 가상 커서 초기화는 이 client 기준 비율을 쓴다 (복귀 시 역변환은 set_return_from_ratio).
+    // 위치가 client 화면에서는 그만큼 위/왼쪽에 대응한다. client 로 보내는 비율은 이
+    // client 기준 비율을 쓴다 (복귀 시 역변환은 set_return_from_ratio).
     double client_ratio = std::clamp(
         ratio - g_client_offset.load(std::memory_order_relaxed), 0.0, 1.0);
-
-    // 클라이언트 가상 커서 위치를 client_handle_sync 와 동일하게 초기화한다.
-    // client 좌표계는 (0,0)~(width,height) 로 가정 (client 는 화면 원점 기준으로 clamp).
-    double cw = (double)g_client_width.load(std::memory_order_relaxed);
-    double ch = (double)g_client_height.load(std::memory_order_relaxed);
-    switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  g_remote.client_x = 2.0;      g_remote.client_y = client_ratio * ch; break;
-    case TETHER_EDGE_LEFT:   g_remote.client_x = cw - 2.0; g_remote.client_y = client_ratio * ch; break;
-    case TETHER_EDGE_BOTTOM: g_remote.client_x = client_ratio * cw; g_remote.client_y = 2.0;      break;
-    case TETHER_EDGE_TOP:    g_remote.client_x = client_ratio * cw; g_remote.client_y = ch - 2.0; break;
-    }
 
     MousePacket pkt{};
     pkt.event_type = EVENT_SYNC_CURSOR;
@@ -404,59 +390,6 @@ static void leave_remote() {
     for (int i = 0; i < 3; ++i) g_engine->send_key(kp);
 
     set_status(TETHER_STATUS_CONNECTED, "connected");
-}
-
-/// host 가 client 가상 커서 위치를 delta 로 누적/clamp 하고, 반대편 경계로 이탈하려는지
-/// 예측한다. 이탈 시 그 위치의 복귀 비율을 계산해 즉시 leave_remote 한다 (왕복 지연 없음).
-/// client 의 client_check_leave 와 동일한 기준으로 판정해 양측이 같은 지점에서 복귀한다.
-static bool host_predict_leave(int16_t dx, int16_t dy) {
-    const double EDGE_MARGIN = 8.0;
-    double cw = (double)g_client_width.load(std::memory_order_relaxed);
-    double ch = (double)g_client_height.load(std::memory_order_relaxed);
-
-    // 직전 실제(clamp된) 위치. 이탈은 "이미 경계 근방에 도달해 있는" 상태에서만 인정한다.
-    double px = g_remote.client_x;
-    double py = g_remote.client_y;
-
-    double nx = px + dx;
-    double ny = py + dy;
-
-    // 이탈 판정은 clamp 전 nx/ny 가 아니라 "직전 위치가 경계 margin 안"인지로 한다.
-    // 중앙에서 큰 delta 한 방(마구 흔들기)에 nx 가 경계를 훌쩍 넘어도, 커서는 실제로는
-    // 아직 경계에 붙지 않았으므로 복귀시키지 않는다. client 는 clamp 된 위치로 판정하므로
-    // 이렇게 해야 양측 기준이 일치하고 오탐(의도치 않은 복귀)이 사라진다.
-    bool leave = false;
-    double ratio = 0.5;   // 경계 평행 축 비율 (복귀 위치)
-    switch (g_cfg.client_edge) {
-    case TETHER_EDGE_RIGHT:  // 왼쪽 경계로 이탈
-        leave = (px <= EDGE_MARGIN && dx < 0);
-        ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
-        break;
-    case TETHER_EDGE_LEFT:   // 오른쪽 경계로 이탈
-        leave = (px >= cw - 1.0 - EDGE_MARGIN && dx > 0);
-        ratio = ch > 0 ? std::clamp(ny, 0.0, ch) / ch : 0.5;
-        break;
-    case TETHER_EDGE_BOTTOM: // 위쪽 경계로 이탈
-        leave = (py <= EDGE_MARGIN && dy < 0);
-        ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
-        break;
-    case TETHER_EDGE_TOP:    // 아래쪽 경계로 이탈
-        leave = (py >= ch - 1.0 - EDGE_MARGIN && dy > 0);
-        ratio = cw > 0 ? std::clamp(nx, 0.0, cw) / cw : 0.5;
-        break;
-    }
-    // 예측이 꺼져 있으면 복귀 판정은 하지 않되, 가상 위치 누적은 유지한다.
-    // (LeavePacket 안전망이 정상 복귀시키고, 실행 중 다시 켰을 때 위치가 정확해진다.)
-    if (!leave || !g_predict_leave.load(std::memory_order_relaxed)) {
-        g_remote.client_x = std::clamp(nx, 0.0, cw - 1.0);
-        g_remote.client_y = std::clamp(ny, 0.0, ch - 1.0);
-        return false;
-    }
-
-    set_return_from_ratio(std::clamp(ratio, 0.0, 1.0));
-    TETHER_INFO(CAT_CURSOR, "[host] predicted return to local: ratio=%.3f", ratio);
-    leave_remote();
-    return true;
 }
 
 // ── CGEventTap 콜백 ───────────────────────────────────────────────────
@@ -562,9 +495,8 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
     }
     g_engine->send_mouse(pkt);
 
-    // host 자체 복귀 판정: delta 를 client 가상 위치에 누적(client 와 동일하게 clamp)하고
-    // 반대편 경계 도달 시 왕복 지연 없이 즉시 복귀한다. client 의 LeavePacket 은 이중 안전망.
-    if (!is_click && !is_scroll && host_predict_leave(pkt.dx, pkt.dy)) return NULL;
+    // 복귀 판정은 실제 커서 위치를 아는 client 가 LeavePacket 으로 요청한다
+    // (request_leave_remote 경로).
     return NULL;
 }
 
@@ -744,8 +676,8 @@ void force_leave_remote(const char* reason) {
     CFRunLoopWakeUp(rl);
 }
 
-// 클라이언트 LeavePacket 수신 시의 복귀 경로. host 자체 예측(host_predict_leave)이
-// 주 경로이며 대개 먼저 복귀하므로, 이 경로는 host 예측이 놓친 경우의 안전망이다.
+// 클라이언트 LeavePacket 수신 시의 복귀 경로. 실제 커서 위치를 아는 client 가
+// 반대편 경계 이탈을 감지해 보내는 요청으로, 원격 복귀의 유일한 정규 경로다.
 // (이미 active=false 면 아래 가드에서 무시됨)
 void request_leave_remote(double ratio) {
     if (!g_remote.active.load(std::memory_order_acquire)) return;

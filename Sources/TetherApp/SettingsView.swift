@@ -219,12 +219,11 @@ struct SettingsView: View {
     }
 
     // ── 탭: 제어 (host 전용) ──────────────────────────────────────
-    // 연결 이후의 커서·입력 동작: 모니터 배치, 복귀 예측, 단축키.
+    // 연결 이후의 커서·입력 동작: 모니터 배치, 단축키.
 
     private var controlTab: some View {
         tabScroll {
             layoutSection
-            behaviorSection
             shortcutSection
         }
     }
@@ -389,26 +388,6 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-        }
-    }
-
-    // ── 커서 동작 (제어 탭) ────────────────────────────────────────
-
-    private var behaviorSection: some View {
-        FormSection(title: L("settings.cursor_section"), icon: "cursorarrow") {
-            FormRow(label: L("settings.predict_leave")) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Toggle("", isOn: $settings.predictLeave)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: settings.predictLeave) { manager.updatePredictLeave($0) }
-                    Text(L("settings.predict_leave_hint"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
         }
     }
 

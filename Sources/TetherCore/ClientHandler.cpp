@@ -167,7 +167,7 @@ static bool client_check_leave(int16_t dx, int16_t dy) {
     if (!leave) return false;
 
     // residual 필드는 프로토콜 호환을 위해 유지하되 0 을 보낸다.
-    // host 는 자체 예측으로 복귀 위치를 계산하므로 잔여 delta 를 쓰지 않는다.
+    // host 는 LeavePacket 의 복귀 비율만 사용하고 잔여 delta 는 쓰지 않는다.
     int16_t r = static_cast<int16_t>(std::clamp(ratio, 0.0, 1.0) * 32767.0);
     g_engine->send_leave(static_cast<uint8_t>(g_client.entry_edge), r, 0, 0);
 

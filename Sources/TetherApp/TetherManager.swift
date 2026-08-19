@@ -131,7 +131,6 @@ class TetherManager: ObservableObject {
         }
 
         config.reconnect_interval_s = UInt16(settings.reconnectInterval)
-        config.predict_leave = settings.predictLeave
         config.client_offset = settings.clientOffset
 
         withUnsafeMutableBytes(of: &config.trigger_display_uuid) { ptr in
@@ -168,11 +167,6 @@ class TetherManager: ObservableObject {
     /// 실행 전이면 다음 start() 에서 설정값이 그대로 적용된다.
     func updateClientEdge(_ edge: ClientEdge) {
         tether_set_client_edge(TetherEdge(UInt32(edge.rawValue)))
-    }
-
-    /// 원격 복귀 예측 on/off 를 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
-    func updatePredictLeave(_ enabled: Bool) {
-        tether_set_predict_leave(enabled)
     }
 
     /// client 화면 정렬 오프셋을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
