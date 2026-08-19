@@ -73,14 +73,27 @@ PROJECT_YML="project.yml"
 CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
 echo "버전: ${CUR_VER:-unknown}"
 
-# 빌드 구성 선택. 기본 Release(성능 최적화 -O3, DEBUG 로그 제거).
-# `bash build.sh debug` → Debug(-O0, DEBUG 매크로 → TETHER_DEBUG 상세 로그 활성화).
+# 빌드 구성/아키텍처 선택. 인자는 순서 무관하게 조합 가능.
+#   debug                    → Debug(-O0, DEBUG 매크로 → TETHER_DEBUG 상세 로그 활성화)
+#   universal|arm64|x86_64   → 대상 아키텍처 (기본: 현재 머신, universal = arm64+x86_64)
+# 기본 Release(성능 최적화 -O3, DEBUG 로그 제거).
 CONFIG="Release"
-if [[ "$1" == "debug" ]]; then
-    CONFIG="Debug"
+ARCH=$(uname -m)
+for arg in "$@"; do
+    case "$arg" in
+        debug)                  CONFIG="Debug" ;;
+        universal|arm64|x86_64) ARCH="$arg" ;;
+    esac
+done
+
+# universal 은 두 아키텍처를 한 번들에 담는다. Debug 구성은 ONLY_ACTIVE_ARCH=YES 가
+# 기본이라 한 아키텍처만 빌드되므로 명시적으로 꺼서 두 슬라이스를 강제한다.
+if [[ "$ARCH" == "universal" ]]; then
+    ARCH_FLAGS=(-arch arm64 -arch x86_64 ONLY_ACTIVE_ARCH=NO)
+else
+    ARCH_FLAGS=(-arch "$ARCH")
 fi
 
-ARCH=$(uname -m)
 echo "빌드 중... (아키텍처: $ARCH, 구성: $CONFIG)"
 
 xcodegen generate --quiet
@@ -88,7 +101,7 @@ xcodebuild -project TetherApp.xcodeproj \
            -scheme TetherApp \
            -configuration "$CONFIG" \
            -derivedDataPath build \
-           -arch "$ARCH" \
+           "${ARCH_FLAGS[@]}" \
            -quiet 2>&1
 
 rm -rf bin/Tether.app
@@ -114,5 +127,5 @@ fi
 codesign --force --deep --sign "$SIGN_ID" bin/Tether.app
 
 echo "-----------------------------------"
-echo "빌드 성공! ($ARCH)"
+echo "빌드 성공! ($(lipo -archs bin/Tether.app/Contents/MacOS/Tether))"
 echo "실행: open bin/Tether.app"

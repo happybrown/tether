@@ -47,8 +47,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "릴리스 버전: $VERSION (빌드 ${GITHUB_RUN_NUMBER})"
 
-      - name: Build (Release)
-        run: bash build.sh
+      # 아키텍처별 자산 3종을 순서대로 빌드/패키징한다.
+      # make_dmg.sh 가 바이너리 아키텍처를 읽어 접미사를 붙이므로 이름이 겹치지 않는다.
+      - name: Build and package (universal, arm64, x86_64)
+        run: |
+          for ARCH in universal arm64 x86_64; do
+            bash build.sh "$ARCH"
+            bash make_dmg.sh
+          done
+          ls -lh bin/*.dmg
 
       - name: Verify built version matches tag
         run: |
@@ -60,21 +67,16 @@ jobs:
           fi
           echo "버전 일치 확인: $BUILT"
 
-      - name: Package dmg
-        id: dmg
-        run: |
-          DMG=$(bash make_dmg.sh | tail -1)
-          echo "path=$DMG" >> "$GITHUB_OUTPUT"
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.dmg.outputs.path }}
+          files: bin/Tether-*.dmg
           generate_release_notes: true
           body: |
             ## 설치
 
-            1. `Tether-${{ steps.version.outputs.version }}.dmg` 를 내려받아 연다
+            1. `Tether-${{ steps.version.outputs.version }}-universal.dmg` 를 내려받아 연다
+               (Apple Silicon/Intel 공용. 용량을 아끼려면 기기에 맞는 `-arm64`/`-x86_64` dmg 를 받아도 된다)
             2. Tether.app 을 Applications 로 끌어다 놓는다
             3. 시스템 설정 → 개인 정보 보호 및 보안 → 손쉬운 사용에서 Tether 를 허용한다
 
