@@ -531,6 +531,15 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
 
     MousePacket pkt{};
     pkt.event_type = type;
+
+    // Other 계열은 버튼 번호(2=휠, 3=뒤로, 4=앞으로, …)를 실어 보내야
+    // client 가 어느 버튼인지 알 수 있다. 좌/우 버튼은 event_type 으로 충분.
+    if (type == kCGEventOtherMouseDown || type == kCGEventOtherMouseUp ||
+        type == kCGEventOtherMouseDragged) {
+        int64_t bn = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
+        pkt.button = static_cast<uint8_t>(std::clamp(bn, 0LL, 31LL));
+    }
+
     if (is_scroll) {
         int64_t sdx = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2);
         int64_t sdy = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);

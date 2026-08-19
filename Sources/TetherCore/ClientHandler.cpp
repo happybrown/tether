@@ -254,7 +254,9 @@ void client_handle_move(const MousePacket& pkt) {
         btn = kCGMouseButtonRight;
     else if (etype == kCGEventOtherMouseDown || etype == kCGEventOtherMouseUp ||
              etype == kCGEventOtherMouseDragged)
-        btn = kCGMouseButtonCenter;
+        // host 가 실어 보낸 버튼 번호를 그대로 주입한다 (2=휠, 3=뒤로, 4=앞으로, …).
+        // 번호가 없으면(구버전 host, button<2) 기존 동작대로 center 로 처리.
+        btn = (pkt.button >= 2) ? (CGMouseButton)pkt.button : kCGMouseButtonCenter;
 
     CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
     if (is_click) {

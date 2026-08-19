@@ -390,9 +390,11 @@ private:
 
     void dispatch(const uint8_t* buf, ssize_t n, const sockaddr_in& sender) {
         uint8_t type = buf[0];
-        if (type == PACKET_MOUSE && n == (ssize_t)sizeof(MousePacket) && on_mouse) {
-            MousePacket p;
-            std::memcpy(&p, buf, sizeof(p));
+        if (type == PACKET_MOUSE && on_mouse &&
+            (n == (ssize_t)sizeof(MousePacket) || n == (ssize_t)sizeof(MousePacket) - 1)) {
+            // 구버전(button 필드 없는 9바이트)도 수용 — button=0 이면 기존 동작(center)과 동일.
+            MousePacket p{};
+            std::memcpy(&p, buf, n);
             on_mouse(p);
         } else if (type == PACKET_KEYBOARD && n == (ssize_t)sizeof(KeyPacket) && on_key) {
             KeyPacket p;

@@ -57,6 +57,7 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     pkt.dx = 42;
     pkt.dy = -7;
     pkt.event_type = 100;
+    pkt.button = 4;   // 사이드 버튼(앞으로) 번호 전달 검증
     client.send_mouse(pkt);  // client는 peer_known=true라 즉시 전송 가능
 
     bool ok = wait_for(received);
@@ -67,6 +68,42 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertEqual(got.dx, 42);
     XCTAssertEqual(got.dy, -7);
     XCTAssertEqual(got.event_type, 100u);
+    XCTAssertEqual(got.button, 4);
+}
+
+// 구버전(button 필드 없는 9바이트) MousePacket 도 수신되는지 — button=0 으로 폴백
+- (void)test_mousePacket_legacy9Bytes {
+    int port = next_test_port();
+
+    std::atomic<bool> received{false};
+    MousePacket       got{};
+
+    auto on_mouse = [&](const MousePacket& pkt) {
+        got = pkt;
+        received.store(true);
+    };
+
+    NetworkEngine host(nullptr, port, on_mouse);
+    NetworkEngine client("127.0.0.1", port);
+    host.start();
+    client.start();
+
+    MousePacket pkt{};
+    pkt.dx = 3;
+    pkt.dy = 5;
+    pkt.event_type = 25;   // kCGEventOtherMouseDown
+    pkt.button = 99;       // 잘려 나가야 하는 값
+    client.send_raw_any(&pkt, sizeof(MousePacket) - 1);   // button 필드 제외 9바이트 전송
+
+    bool ok = wait_for(received);
+    host.stop();
+    client.stop();
+
+    XCTAssertTrue(ok, @"구버전 MousePacket 수신 타임아웃");
+    XCTAssertEqual(got.dx, 3);
+    XCTAssertEqual(got.dy, 5);
+    XCTAssertEqual(got.event_type, 25u);
+    XCTAssertEqual(got.button, 0);
 }
 
 // KeyPacket 송수신

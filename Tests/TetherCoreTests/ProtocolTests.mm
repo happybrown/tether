@@ -13,7 +13,7 @@
 @implementation ProtocolTests
 
 - (void)test_packetSizes {
-    XCTAssertEqual(sizeof(MousePacket),      9u);
+    XCTAssertEqual(sizeof(MousePacket),     10u);
     XCTAssertEqual(sizeof(KeyPacket),       11u);
     XCTAssertEqual(sizeof(HelloPacket),     64u);
     XCTAssertEqual(sizeof(AuthAckPacket),   34u);
