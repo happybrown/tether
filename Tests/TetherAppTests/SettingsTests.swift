@@ -92,6 +92,17 @@ final class TetherConfigBridgingTests: XCTestCase {
         tether_set_client_offset(0)
     }
 
+    func test_syncLockScreen_defaultsToFalseAndAssigns() {
+        var config = TetherConfig()
+        // 미설정 시 false (기존 동작 유지 — 잠금 전파 없음)
+        XCTAssertFalse(config.sync_lock_screen)
+        config.sync_lock_screen = true
+        XCTAssertTrue(config.sync_lock_screen)
+        // 실행 전 호출해도 안전해야 한다 (IDLE 상태에선 값만 보관)
+        tether_set_lock_sync(true)
+        tether_set_lock_sync(false)
+    }
+
     func test_isHost_flag() {
         var hostConfig = TetherConfig()
         hostConfig.is_host = true

@@ -38,6 +38,9 @@ typedef struct {
     // 지정하면 그 디스플레이의 client_edge 방향 경계에서만 원격으로 전환한다.
     // (멀티 모니터에서 "맥북 화면 오른쪽 → 상대 Mac" 같은 내부 경계 지정 가능)
     char      trigger_display_uuid[40];
+    // host: 잠금 화면 동기화. true 면 host 에서 macOS 잠금 단축키(Ctrl+Cmd+Q)를
+    // 감지해 client 도 함께 잠금 화면으로 전환한다. client 모드에서는 무시된다.
+    bool      sync_lock_screen;
 } TetherConfig;
 
 #ifndef TETHER_LOG_LEVEL_DEFINED
@@ -100,6 +103,10 @@ void tether_set_client_edge(TetherEdge edge);
 // client 화면 정렬 오프셋을 실시간으로 변경한다 (host 모드 전용).
 // 범위 밖 값은 -1.0 ~ +1.0 으로 clamp 되며, 다음 진입/복귀부터 즉시 반영된다.
 void tether_set_client_offset(double offset);
+
+// 잠금 화면 동기화를 실행 중에도 재시작 없이 즉시 변경한다 (host 모드 전용).
+// true 면 host 잠금 단축키(Ctrl+Cmd+Q) 감지 시 client 로 잠금 요청을 보낸다.
+void tether_set_lock_sync(bool enabled);
 
 // host: 연결된 client 의 화면 크기를 조회한다 (설정 UI 의 배치 시각화용).
 // client 가 ClientInfoPacket 을 보내기 전(미연결 포함)이면 false 를 반환한다.

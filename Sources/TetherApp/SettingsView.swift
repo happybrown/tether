@@ -224,6 +224,7 @@ struct SettingsView: View {
     private var controlTab: some View {
         tabScroll {
             layoutSection
+            lockSyncSection
             shortcutSection
         }
     }
@@ -524,6 +525,20 @@ struct SettingsView: View {
                     isOn: $settings.autoStart
                 )
             }
+        }
+    }
+
+    // ── 잠금 화면 동기화 (제어 탭, host 전용) ──────────────────────
+
+    private var lockSyncSection: some View {
+        FormSection(title: L("settings.lock_section"), icon: "lock.desktopcomputer") {
+            FormToggleRow(
+                label: L("settings.lock_sync"),
+                description: L("settings.lock_sync_hint"),
+                isOn: $settings.syncLockScreen
+            )
+            // 실행 중에도 재시작 없이 즉시 반영한다.
+            .onChange(of: settings.syncLockScreen) { manager.updateLockSync($0) }
         }
     }
 

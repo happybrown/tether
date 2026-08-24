@@ -63,6 +63,10 @@ class AppSettings: ObservableObject {
     @Published var triggerDisplayUUID: String {
         didSet { save() }
     }
+    // 잠금 화면 동기화 (host 전용): host 에서 잠금 단축키(⌃⌘Q)를 누르면 client 도 잠근다.
+    @Published var syncLockScreen: Bool {
+        didSet { save() }
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -77,6 +81,7 @@ class AppSettings: ObservableObject {
         reconnectInterval  = defaults.integer(forKey: "reconnectInterval").nonZero ?? 5
         clientOffset       = defaults.object(forKey: "clientOffset") as? Double ?? 0
         triggerDisplayUUID = defaults.string(forKey: "triggerDisplayUUID") ?? ""
+        syncLockScreen     = defaults.bool(forKey: "syncLockScreen")
     }
 
     private func save() {
@@ -90,6 +95,7 @@ class AppSettings: ObservableObject {
         defaults.set(psk, forKey: "psk")
         defaults.set(clientOffset, forKey: "clientOffset")
         defaults.set(triggerDisplayUUID, forKey: "triggerDisplayUUID")
+        defaults.set(syncLockScreen, forKey: "syncLockScreen")
     }
 }
 

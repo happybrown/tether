@@ -122,6 +122,10 @@
 "settings.auto_start" = "Auto-connect on Launch";
 "settings.auto_start_hint" = "Starts the session with saved settings when the app launches";
 
+"settings.lock_section" = "Lock Screen";
+"settings.lock_sync" = "Sync Lock Screen";
+"settings.lock_sync_hint" = "Pressing the lock shortcut (⌃⌘Q) on the Host also locks the Client";
+
 "settings.shortcut_section" = "Shortcuts";
 "settings.shortcut_force_local" = "Force Local Return";
 "settings.shortcut_force_local_hint" = "Immediately returns control to the Host while in remote mode";

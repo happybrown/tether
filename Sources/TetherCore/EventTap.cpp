@@ -22,6 +22,7 @@ extern NetworkEngine*           g_engine;
 extern CFMachPortRef            g_mouse_tap;
 extern CFMachPortRef            g_key_tap;
 extern std::atomic<double>      g_client_offset;  // client 화면 정렬 오프셋 (비율)
+extern std::atomic<bool>        g_lock_sync;      // 잠금 화면 동기화 활성 여부
 extern RemoteState              g_remote;
 extern std::atomic<CFRunLoopRef> g_run_loop;
 extern std::atomic<bool>        g_taps_active;
@@ -523,6 +524,20 @@ static bool is_escape_shortcut(CGEventType type, CGEventRef event, bool* out_sto
     return false;
 }
 
+// macOS 잠금 화면 단축키(Ctrl+Cmd+Q) 감지. keyDown 만 검사한다.
+// keycode 12 = kVK_ANSI_Q. 다른 modifier 가 섞이면 잠금 단축키가 아니다.
+static bool is_lock_shortcut(CGEventType type, CGEventRef event) {
+    if (type != kCGEventKeyDown) return false;
+    CGKeyCode kc = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    if (kc != 12) return false;
+    CGEventFlags f = CGEventGetFlags(event);
+    bool cmd   = (f & kCGEventFlagMaskCommand)   != 0;
+    bool ctrl  = (f & kCGEventFlagMaskControl)   != 0;
+    bool shift = (f & kCGEventFlagMaskShift)     != 0;
+    bool alt   = (f & kCGEventFlagMaskAlternate) != 0;
+    return cmd && ctrl && !shift && !alt;
+}
+
 // 세션 강제 중지 콜백 — Swift 에서 등록, CGEventTap 콜백에서 호출
 static std::function<void()> g_force_stop_cb;
 
@@ -549,6 +564,18 @@ static CGEventRef keyboard_callback(CGEventTapProxy, CGEventType type, CGEventRe
         }
         return NULL;
     }
+
+    // 잠금 화면 동기화: host 잠금 단축키를 client 로 전파한다.
+    // 원격 중이면 먼저 로컬로 복귀해 잠금 화면 뒤에 원격 모드가 남지 않게 하고,
+    // 이벤트는 통과시켜 host 자신도 정상적으로 잠기게 한다 (양쪽 동시 잠금).
+    if (g_lock_sync.load(std::memory_order_relaxed) && is_lock_shortcut(type, event)) {
+        TETHER_INFO(CAT_EVENT, "[host] lock shortcut detected — propagating lock to client");
+        if (g_remote.active.load(std::memory_order_acquire)) leave_remote();
+        // 제어 신호라 유실 시 client 만 잠기지 않으므로 3회 전송한다 (client 가 중복 무시).
+        for (int i = 0; i < 3; ++i) g_engine->send_lock();
+        return event;
+    }
+
     if (!g_remote.active.load(std::memory_order_acquire)) return event;
 
     CGKeyCode    keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);

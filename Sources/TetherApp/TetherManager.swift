@@ -132,6 +132,7 @@ class TetherManager: ObservableObject {
 
         config.reconnect_interval_s = UInt16(settings.reconnectInterval)
         config.client_offset = settings.clientOffset
+        config.sync_lock_screen = settings.syncLockScreen
 
         withUnsafeMutableBytes(of: &config.trigger_display_uuid) { ptr in
             settings.triggerDisplayUUID.withCString { src in
@@ -172,6 +173,11 @@ class TetherManager: ObservableObject {
     /// client 화면 정렬 오프셋을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
     func updateClientOffset(_ offset: Double) {
         tether_set_client_offset(offset)
+    }
+
+    /// 잠금 화면 동기화를 실행 중에도 재시작 없이 즉시 반영한다 (host 전용).
+    func updateLockSync(_ enabled: Bool) {
+        tether_set_lock_sync(enabled)
     }
 
     /// 전환 기준 화면을 실행 중에도 재시작 없이 즉시 반영한다 (host 전용, 빈 문자열=자동).

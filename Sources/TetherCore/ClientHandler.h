@@ -57,6 +57,11 @@ void client_handle_move(const MousePacket& pkt);
 /// host의 키보드 패킷을 CGEventPost로 주입한다.
 void client_handle_key(const KeyPacket& pkt);
 
+/// host 의 잠금 화면 동기화 요청(PACKET_LOCK)을 처리한다.
+/// 잠금 단축키(Ctrl+Cmd+Q)를 주입해 client 도 잠금 화면으로 전환한다.
+/// 유실 방지로 여러 번 전송되는 신호이므로 짧은 시간 내 중복은 무시한다.
+void client_handle_lock();
+
 /// 호스트로 복귀할 때 클라이언트 커서를 화면 밖으로 밀어 보이지 않게 한다.
 /// 메뉴바 앱(창 없음)에서는 CGDisplayHideCursor/NSCursor.hide 가 실제로 커서를
 /// 숨기지 못하므로(포커스 조건 불충족), host 원격 모드와 동일하게 offscreen warp 로

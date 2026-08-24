@@ -329,3 +329,33 @@ void client_handle_key(const KeyPacket& pkt) {
     CGEventPost(kCGHIDEventTap, ev);
     CFRelease(ev);
 }
+
+// ── 잠금 화면 동기화 ──────────────────────────────────────────────────
+
+void client_handle_lock() {
+    // 유실 방지로 3회 전송되는 제어 신호이므로 짧은 시간 내 중복은 한 번만 처리한다.
+    // recv 스레드 단일 실행이라 static 상태에 별도 동기화가 필요 없다.
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last{};
+    auto now = clock::now();
+    if (now - last < std::chrono::seconds(2)) return;
+    last = now;
+
+    // 화면이 꺼진 상태에서는 합성 이벤트가 처리되지 않을 수 있어 먼저 깨운다.
+    client_wake_display();
+
+    // 잠금 단축키(Ctrl+Cmd+Q)를 그대로 주입해 시스템 잠금 화면을 띄운다.
+    // 기존 키 주입과 동일한 경로/권한(손쉬운 사용)으로 동작해 별도 API 가 필요 없다.
+    const CGKeyCode kKeyQ = 12; // kVK_ANSI_Q
+    const CGEventFlags flags = kCGEventFlagMaskCommand | kCGEventFlagMaskControl;
+    CGEventRef down = CGEventCreateKeyboardEvent(NULL, kKeyQ, true);
+    CGEventRef up   = CGEventCreateKeyboardEvent(NULL, kKeyQ, false);
+    CGEventSetFlags(down, flags);
+    CGEventSetFlags(up, flags);
+    CGEventPost(kCGHIDEventTap, down);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(down);
+    CFRelease(up);
+
+    TETHER_INFO(CAT_EVENT, "[client] lock requested by host — locking screen");
+}

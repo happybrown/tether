@@ -226,6 +226,13 @@ public:
         }
     }
 
+    // host → client: 잠금 화면 동기화 요청 (peer_known 필요).
+    // 유실 시 client 만 잠기지 않으므로 호출부가 여러 번 보낸다 (수신 측이 중복 무시).
+    void send_lock() {
+        uint8_t pkt = PACKET_LOCK;
+        send_raw(&pkt, 1);
+    }
+
     // client → host: 화면 크기 전송 (단일 패킷)
     void send_client_info(int32_t width, int32_t height) {
         ClientInfoPacket pkt{};
@@ -252,6 +259,9 @@ public:
     // 네트워크 성능 측정 probe 수신 콜백 등록 (양방향). 인증 후 언제든 오갈 수 있다.
     void set_probe_callback(std::function<void(const ProbePacket&)> cb) { on_probe = std::move(cb); }
 
+    // client: 잠금 화면 동기화 요청 수신 콜백 등록 (setter — 생성자 인자 비대화 방지)
+    void set_lock_callback(std::function<void()> cb) { on_lock = std::move(cb); }
+
     // 측정 probe 전송 (요청 또는 응답). 인증 완료 상태에서만 의미가 있다.
     void send_probe(const ProbePacket& p) { send_raw(&p, sizeof(p)); }
 
@@ -270,6 +280,7 @@ private:
     std::atomic<bool> running{false};
     std::function<void(const LeavePacket&)> on_leave;
     std::function<void(const ProbePacket&)> on_probe;
+    std::function<void()>                   on_lock;
     MouseRecvCallback      on_mouse;
     KeyRecvCallback        on_key;
     HelloRecvCallback      on_hello;
@@ -428,6 +439,8 @@ private:
             ProbePacket p;
             std::memcpy(&p, buf, sizeof(p));
             on_probe(p);
+        } else if (type == PACKET_LOCK && n == 1 && on_lock) {
+            on_lock();
         }
     }
 };

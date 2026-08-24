@@ -144,6 +144,10 @@ std::atomic<int32_t> g_client_height{18000};
 // EventTap.cpp 의 진입/복귀 비율 변환에서 참조한다. 자세한 의미는 tether_core.h 참고.
 std::atomic<double> g_client_offset{0.0};
 
+// host: 잠금 화면 동기화 활성 여부. EventTap.cpp 의 keyboard_callback 이
+// 잠금 단축키(Ctrl+Cmd+Q) 감지·전파 여부를 이 값으로 결정한다.
+std::atomic<bool> g_lock_sync{false};
+
 // host: ClientInfoPacket 수신 여부. g_client_width/height 의 기본값(sentinel)과
 // 실제 수신값을 구분해, 설정 UI 가 "크기 미상" 상태를 표시할 수 있게 한다.
 static std::atomic<bool> g_client_size_known{false};
@@ -257,6 +261,7 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
     g_auth_ok.store(false, std::memory_order_release);
     g_reconnect_interval_s = (g_cfg.reconnect_interval_s > 0) ? g_cfg.reconnect_interval_s : 5;
     g_client_offset.store(std::clamp(g_cfg.client_offset, -1.0, 1.0), std::memory_order_relaxed);
+    g_lock_sync.store(g_cfg.sync_lock_screen, std::memory_order_relaxed);
     g_client_size_known.store(false, std::memory_order_release);
     // 원격 모드 빠른 복귀 타임아웃: PING 주기의 2배(최소 10초). PING 1회 유실로 복귀 방지.
     g_remote_fast_timeout_s = std::max(10, g_reconnect_interval_s * 2);
@@ -547,6 +552,12 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
                                      nullptr, on_pong, on_clipboard_client,
                                      nullptr, on_disconnect_client);
         g_engine->set_probe_callback(handle_probe);
+        // host 의 잠금 화면 동기화 요청. 전송 여부는 host 쪽 설정이 결정하므로
+        // client 는 인증된 host 의 요청을 그대로 수행한다 (원격 키 주입과 동일 권한).
+        g_engine->set_lock_callback([]() {
+            if (!g_auth_ok.load(std::memory_order_acquire)) return;
+            client_handle_lock();
+        });
         g_engine->start();
 
         TETHER_INFO(CAT_AUTH, "[client] sending HELLO: %s:%d (retry interval=%us)",
@@ -844,6 +855,12 @@ void tether_set_client_offset(double offset) {
     double clamped = std::clamp(offset, -1.0, 1.0);
     g_client_offset.store(clamped, std::memory_order_relaxed);
     g_cfg.client_offset = clamped;  // 이후 재시작 시에도 유지
+}
+
+void tether_set_lock_sync(bool enabled) {
+    // 값 하나만 바꾸는 실시간 갱신 — 다음 잠금 단축키 감지부터 즉시 반영된다.
+    g_lock_sync.store(enabled, std::memory_order_relaxed);
+    g_cfg.sync_lock_screen = enabled;  // 이후 재시작 시에도 유지
 }
 
 void tether_displays_changed() {

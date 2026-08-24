@@ -341,6 +341,43 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertTrue(ok, @"send_raw_any가 인증 전에도 전송 가능해야 함");
 }
 
+// LOCK 패킷: host → client 방향 (set_peer 후) 잠금 동기화 콜백 호출 확인
+- (void)test_lockPacket_hostToClient {
+    int port = next_test_port();
+
+    std::atomic<bool> hello_received{false};
+    std::atomic<bool> lock_received{false};
+    sockaddr_in       client_sender{};
+
+    auto on_hello = [&](const HelloPacket&, const sockaddr_in& sender) {
+        client_sender = sender;
+        hello_received.store(true);
+    };
+
+    NetworkEngine host(nullptr, port, nullptr, nullptr, on_hello);
+    NetworkEngine client("127.0.0.1", port);
+    client.set_lock_callback([&]() { lock_received.store(true); });
+    host.start();
+    client.start();
+
+    // host 가 client 주소를 학습하도록 HELLO 를 먼저 보낸다
+    HelloPacket hello{};
+    hello.packet_type = PACKET_HELLO;
+    strncpy(hello.hostname, "client", sizeof(hello.hostname) - 1);
+    hello.timestamp_s = (int64_t)time(nullptr);
+    client.send_raw_any(&hello, sizeof(hello));
+    XCTAssertTrue(wait_for(hello_received), @"HELLO 수신 타임아웃");
+
+    host.set_peer(client_sender);
+    host.send_lock();
+
+    bool ok = wait_for(lock_received);
+    host.stop();
+    client.stop();
+
+    XCTAssertTrue(ok, @"LOCK 패킷 수신 타임아웃");
+}
+
 // 여러 청크로 분할되는 큰 클립보드가 온전히 재조립되는지 검증
 - (void)test_clipboard_largePayload_reassembled {
     int port = next_test_port();
