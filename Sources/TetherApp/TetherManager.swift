@@ -39,6 +39,20 @@ class TetherManager: ObservableObject {
         registerClipboardCallback()
         registerForceStopCallback()
         observeScreenChanges()
+        observeScreenUnlock()
+    }
+
+    /// host 자신의 화면 잠금이 해제되는 것을 관찰해 C 코어에 통지한다.
+    /// C 코어가 host 모드 + 잠금 동기화 on + client 연결 상태에서만 UNLOCK 을 전파하므로
+    /// 조건 판단을 C 쪽에 위임하고 여기서는 이벤트만 전달한다.
+    /// `com.apple.screenIsUnlocked` 는 로그인 화면 인증을 통과해 데스크톱이 나타나는 시점에 온다.
+    private func observeScreenUnlock() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.screenIsUnlocked"),
+            object: nil, queue: .main
+        ) { _ in
+            tether_notify_host_unlocked()
+        }
     }
 
     /// 모니터 연결/해제/배치 변경을 관찰해 C 코어에 통지한다.

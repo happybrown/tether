@@ -124,7 +124,7 @@
 
 "settings.lock_section" = "Lock Screen";
 "settings.lock_sync" = "Sync Lock Screen";
-"settings.lock_sync_hint" = "Pressing the lock shortcut (⌃⌘Q) on the Host also locks the Client";
+"settings.lock_sync_hint" = "Locking the Host (⌃⌘Q) also locks the Client, and unlocking the Host wakes the Client's login screen (password entry is still up to you)";
 
 "settings.shortcut_section" = "Shortcuts";
 "settings.shortcut_force_local" = "Force Local Return";

@@ -25,6 +25,7 @@ static const uint8_t PACKET_CLIENT_INFO = 7; // client → host: 화면 크기 �
 static const uint8_t PACKET_LEAVE       = 8; // client → host: 반대편 경계 이탈 복귀 요청
 static const uint8_t PACKET_PROBE       = 9; // 양방향: 네트워크 성능(RTT) 측정 요청/응답
 static const uint8_t PACKET_LOCK        = 10; // host → client: 잠금 화면 동기화 (1바이트, 구조체 없음)
+static const uint8_t PACKET_UNLOCK      = 11; // host → client: 잠금 해제(화면 깨우기) 동기화 (1바이트)
 
 // 클립보드 패킷 최대 페이로드 크기. 이미지(PNG)까지 수용하도록 8MB.
 // 8MB / 1400B ≈ 5992 청크로 total_chunks(uint16) 범위 내이다.

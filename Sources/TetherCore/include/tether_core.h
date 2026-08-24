@@ -108,6 +108,12 @@ void tether_set_client_offset(double offset);
 // true 면 host 잠금 단축키(Ctrl+Cmd+Q) 감지 시 client 로 잠금 요청을 보낸다.
 void tether_set_lock_sync(bool enabled);
 
+// host: 자신의 화면 잠금이 해제(화면 깨어남)됐을 때 Swift 가 호출한다.
+// 잠금 동기화가 켜져 있고 client 가 연결돼 있으면 client 로 UNLOCK 요청을 보내
+// client 화면도 함께 깨운다 (로그인 화면 표시). client 모드/미연결/기능 off 면 무시된다.
+// (실제 비밀번호 인증은 합성 입력으로 불가하므로 화면 깨우기까지만 동기화한다.)
+void tether_notify_host_unlocked(void);
+
 // host: 연결된 client 의 화면 크기를 조회한다 (설정 UI 의 배치 시각화용).
 // client 가 ClientInfoPacket 을 보내기 전(미연결 포함)이면 false 를 반환한다.
 bool tether_get_client_size(int32_t* width, int32_t* height);

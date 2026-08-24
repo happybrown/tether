@@ -378,6 +378,42 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertTrue(ok, @"LOCK 패킷 수신 타임아웃");
 }
 
+// UNLOCK 패킷: host → client 방향 (set_peer 후) 잠금 해제 동기화 콜백 호출 확인
+- (void)test_unlockPacket_hostToClient {
+    int port = next_test_port();
+
+    std::atomic<bool> hello_received{false};
+    std::atomic<bool> unlock_received{false};
+    sockaddr_in       client_sender{};
+
+    auto on_hello = [&](const HelloPacket&, const sockaddr_in& sender) {
+        client_sender = sender;
+        hello_received.store(true);
+    };
+
+    NetworkEngine host(nullptr, port, nullptr, nullptr, on_hello);
+    NetworkEngine client("127.0.0.1", port);
+    client.set_unlock_callback([&]() { unlock_received.store(true); });
+    host.start();
+    client.start();
+
+    HelloPacket hello{};
+    hello.packet_type = PACKET_HELLO;
+    strncpy(hello.hostname, "client", sizeof(hello.hostname) - 1);
+    hello.timestamp_s = (int64_t)time(nullptr);
+    client.send_raw_any(&hello, sizeof(hello));
+    XCTAssertTrue(wait_for(hello_received), @"HELLO 수신 타임아웃");
+
+    host.set_peer(client_sender);
+    host.send_unlock();
+
+    bool ok = wait_for(unlock_received);
+    host.stop();
+    client.stop();
+
+    XCTAssertTrue(ok, @"UNLOCK 패킷 수신 타임아웃");
+}
+
 // 여러 청크로 분할되는 큰 클립보드가 온전히 재조립되는지 검증
 - (void)test_clipboard_largePayload_reassembled {
     int port = next_test_port();

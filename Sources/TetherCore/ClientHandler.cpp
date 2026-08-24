@@ -359,3 +359,21 @@ void client_handle_lock() {
 
     TETHER_INFO(CAT_EVENT, "[client] lock requested by host — locking screen");
 }
+
+void client_handle_unlock() {
+    // 잠금과 동일한 중복 억제 (3회 전송되는 신호). client_handle_lock 과 별도 타임스탬프.
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last{};
+    auto now = clock::now();
+    if (now - last < std::chrono::seconds(2)) return;
+    last = now;
+
+    // 디스플레이/시스템을 깨워 로그인 화면을 띄운다. 화면이 이미 켜져 있어도(잠금 상태로
+    // 표시만 대기) 활동 선언은 로그인 화면을 전면에 불러오므로 상태와 무관하게 호출한다.
+    // 실제 비밀번호 인증은 사용자 몫이다 — 합성 입력으로 인증을 대신할 수 없다.
+    IOPMAssertionID id = 0;
+    IOPMAssertionDeclareUserActivity(
+        CFSTR("tether remote unlock"), kIOPMUserActiveLocal, &id);
+
+    TETHER_INFO(CAT_EVENT, "[client] unlock (wake) requested by host — waking screen");
+}

@@ -558,6 +558,11 @@ bool tether_start(const TetherConfig* config, TetherStatusCallback cb, void* ctx
             if (!g_auth_ok.load(std::memory_order_acquire)) return;
             client_handle_lock();
         });
+        // host 의 잠금 해제(화면 깨우기) 요청. 잠금과 동일하게 host 설정이 전송을 게이트한다.
+        g_engine->set_unlock_callback([]() {
+            if (!g_auth_ok.load(std::memory_order_acquire)) return;
+            client_handle_unlock();
+        });
         g_engine->start();
 
         TETHER_INFO(CAT_AUTH, "[client] sending HELLO: %s:%d (retry interval=%us)",
@@ -861,6 +866,18 @@ void tether_set_lock_sync(bool enabled) {
     // 값 하나만 바꾸는 실시간 갱신 — 다음 잠금 단축키 감지부터 즉시 반영된다.
     g_lock_sync.store(enabled, std::memory_order_relaxed);
     g_cfg.sync_lock_screen = enabled;  // 이후 재시작 시에도 유지
+}
+
+void tether_notify_host_unlocked() {
+    // host 모드 + 잠금 동기화 on + client 연결(peer 등록) 상태에서만 전파한다.
+    // g_lifecycle_mu 로 tether_stop 과의 g_engine 파괴 경쟁을 막는다 (send_clipboard 와 동일 패턴).
+    std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
+    if (!g_engine || !g_cfg.is_host) return;
+    if (!g_lock_sync.load(std::memory_order_relaxed)) return;
+    if (!g_engine->is_peer_known()) return;
+    TETHER_INFO(CAT_EVENT, "[host] screen unlocked — propagating wake to client");
+    // 제어 신호라 유실 시 client 만 안 깨어나므로 3회 전송한다 (client 가 중복 무시).
+    for (int i = 0; i < 3; ++i) g_engine->send_unlock();
 }
 
 void tether_displays_changed() {

@@ -124,7 +124,7 @@
 
 "settings.lock_section" = "잠금 화면";
 "settings.lock_sync" = "잠금 화면 동기화";
-"settings.lock_sync_hint" = "Host 에서 잠금 단축키(⌃⌘Q)를 누르면 Client 도 함께 잠깁니다";
+"settings.lock_sync_hint" = "Host 를 잠그면(⌃⌘Q) Client 도 함께 잠기고, Host 잠금을 풀면 Client 의 로그인 화면이 깨어납니다 (비밀번호 입력은 직접 해야 합니다)";
 
 "settings.shortcut_section" = "단축키";
 "settings.shortcut_force_local" = "로컬 강제 복귀";

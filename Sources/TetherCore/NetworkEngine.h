@@ -233,6 +233,13 @@ public:
         send_raw(&pkt, 1);
     }
 
+    // host → client: 잠금 해제(화면 깨우기) 동기화 요청 (peer_known 필요).
+    // send_lock 과 동일하게 유실 대비로 호출부가 여러 번 보낸다 (수신 측이 중복 무시).
+    void send_unlock() {
+        uint8_t pkt = PACKET_UNLOCK;
+        send_raw(&pkt, 1);
+    }
+
     // client → host: 화면 크기 전송 (단일 패킷)
     void send_client_info(int32_t width, int32_t height) {
         ClientInfoPacket pkt{};
@@ -262,6 +269,9 @@ public:
     // client: 잠금 화면 동기화 요청 수신 콜백 등록 (setter — 생성자 인자 비대화 방지)
     void set_lock_callback(std::function<void()> cb) { on_lock = std::move(cb); }
 
+    // client: 잠금 해제(화면 깨우기) 동기화 요청 수신 콜백 등록
+    void set_unlock_callback(std::function<void()> cb) { on_unlock = std::move(cb); }
+
     // 측정 probe 전송 (요청 또는 응답). 인증 완료 상태에서만 의미가 있다.
     void send_probe(const ProbePacket& p) { send_raw(&p, sizeof(p)); }
 
@@ -281,6 +291,7 @@ private:
     std::function<void(const LeavePacket&)> on_leave;
     std::function<void(const ProbePacket&)> on_probe;
     std::function<void()>                   on_lock;
+    std::function<void()>                   on_unlock;
     MouseRecvCallback      on_mouse;
     KeyRecvCallback        on_key;
     HelloRecvCallback      on_hello;
@@ -441,6 +452,8 @@ private:
             on_probe(p);
         } else if (type == PACKET_LOCK && n == 1 && on_lock) {
             on_lock();
+        } else if (type == PACKET_UNLOCK && n == 1 && on_unlock) {
+            on_unlock();
         }
     }
 };

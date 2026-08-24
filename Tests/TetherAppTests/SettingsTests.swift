@@ -101,6 +101,8 @@ final class TetherConfigBridgingTests: XCTestCase {
         // 실행 전 호출해도 안전해야 한다 (IDLE 상태에선 값만 보관)
         tether_set_lock_sync(true)
         tether_set_lock_sync(false)
+        // 미실행(IDLE) 상태에서 잠금 해제 통지를 호출해도 크래시 없이 무시된다.
+        tether_notify_host_unlocked()
     }
 
     func test_isHost_flag() {

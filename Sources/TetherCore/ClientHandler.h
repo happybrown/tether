@@ -62,6 +62,11 @@ void client_handle_key(const KeyPacket& pkt);
 /// 유실 방지로 여러 번 전송되는 신호이므로 짧은 시간 내 중복은 무시한다.
 void client_handle_lock();
 
+/// host 의 잠금 해제 동기화 요청(PACKET_UNLOCK)을 처리한다.
+/// 디스플레이/시스템을 깨워 로그인 화면을 띄운다 (비밀번호 입력은 사용자 몫 —
+/// 합성 입력으로 인증을 대신할 수 없다). 잠금과 마찬가지로 짧은 시간 내 중복은 무시한다.
+void client_handle_unlock();
+
 /// 호스트로 복귀할 때 클라이언트 커서를 화면 밖으로 밀어 보이지 않게 한다.
 /// 메뉴바 앱(창 없음)에서는 CGDisplayHideCursor/NSCursor.hide 가 실제로 커서를
 /// 숨기지 못하므로(포커스 조건 불충족), host 원격 모드와 동일하게 offscreen warp 로
