@@ -30,10 +30,10 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      # 태그(v1.2.3)에서 버전을 뽑아 project.yml 에 반영한다.
-      # project.yml 이 버전 단일 소스이므로, 이렇게 해야 앱 번들과 dmg 파일명이
-      # 태그와 정확히 일치한다.
-      - name: Set version from tag
+      # 태그(v1.2.3)에서 버전을 뽑는다. 실제 주입은 build.sh 가 TETHER_VERSION/
+      # TETHER_BUILD env 를 읽어 xcodebuild 에 넘기므로 project.yml 을 건드리지 않는다.
+      # (shallow checkout 에서 git describe 가 태그를 못 찾는 경우까지 안전.)
+      - name: Resolve version from tag
         id: version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -41,15 +41,15 @@ jobs:
             echo "태그가 vX.Y.Z 형식이 아닙니다: $GITHUB_REF_NAME" >&2
             exit 1
           fi
-          sed -i '' -E "s/(MARKETING_VERSION: )\"[0-9.]+\"/\1\"$VERSION\"/" project.yml
-          # 빌드 번호는 릴리스마다 단조 증가해야 한다 (동일 버전 재릴리스 구분용).
-          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: )\"[0-9]+\"/\1\"${GITHUB_RUN_NUMBER}\"/" project.yml
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "릴리스 버전: $VERSION (빌드 ${GITHUB_RUN_NUMBER})"
 
       # 아키텍처별 자산 3종을 순서대로 빌드/패키징한다.
       # make_dmg.sh 가 바이너리 아키텍처를 읽어 접미사를 붙이므로 이름이 겹치지 않는다.
       - name: Build and package (universal, arm64, x86_64)
+        env:
+          TETHER_VERSION: ${{ steps.version.outputs.version }}
+          TETHER_BUILD: ${{ github.run_number }}
         run: |
           for ARCH in universal arm64 x86_64; do
             bash build.sh "$ARCH"

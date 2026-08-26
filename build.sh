@@ -66,12 +66,29 @@ fi
 
 mkdir -p bin
 
-# 버전은 태그로 관리한다 — 빌드는 project.yml 의 값을 그대로 읽어 쓴다.
-# 릴리스는 v* 태그를 푸시하면 .github/workflows/release.yml 이 태그 버전을
-# project.yml 에 반영해 빌드하므로, 로컬 빌드가 버전을 건드릴 이유가 없다.
-PROJECT_YML="project.yml"
-CUR_VER=$(grep 'MARKETING_VERSION:' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
-echo "버전: ${CUR_VER:-unknown}"
+# ── 버전 파생 ──────────────────────────────────────────────────────────
+# 버전 단일 소스는 git 태그(vX.Y.Z)다. 예전엔 project.yml 리터럴을 읽었는데,
+# 그 값은 릴리스 CI 만 갱신해 로컬 빌드가 실제보다 낮은 stale 버전으로 찍히는
+# 문제가 있었다. 그래서 빌드 시점에 git 에서 파생한다:
+#   - 태그 커밋을 clean 상태로 빌드 → 그 태그 버전 그대로 (릴리스와 동일)
+#   - 태그 이후 커밋/작업 중(dev)    → patch +1 한 "다음 버전" (항상 릴리스보다 높음)
+# 명시 지정이 필요하면 TETHER_VERSION / TETHER_BUILD 로 덮어쓴다 (CI 가 태그·run 번호 주입).
+derive_version() {
+    local tag base commits dirty major minor patch
+    tag=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null) || tag="v0.0.0"
+    base="${tag#v}"
+    commits=$(git rev-list "${tag}..HEAD" --count 2>/dev/null || echo 0)
+    git diff --quiet 2>/dev/null || dirty=1
+    if [[ "$commits" -eq 0 && -z "$dirty" ]]; then
+        echo "$base"; return
+    fi
+    IFS=. read -r major minor patch <<< "$base"
+    echo "${major}.${minor}.$((patch + 1))"
+}
+VER="${TETHER_VERSION:-$(derive_version)}"
+# 빌드 번호: 전체 커밋 수 → 커밋마다 단조 증가. CI 는 TETHER_BUILD 로 run 번호를 넘긴다.
+BUILD="${TETHER_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+echo "버전: ${VER} (빌드 ${BUILD})"
 
 # 빌드 구성/아키텍처 선택. 인자는 순서 무관하게 조합 가능.
 #   debug                    → Debug(-O0, DEBUG 매크로 → TETHER_DEBUG 상세 로그 활성화)
@@ -101,6 +118,8 @@ xcodebuild -project TetherApp.xcodeproj \
            -scheme TetherApp \
            -configuration "$CONFIG" \
            -derivedDataPath build \
+           MARKETING_VERSION="$VER" \
+           CURRENT_PROJECT_VERSION="$BUILD" \
            "${ARCH_FLAGS[@]}" \
            -quiet 2>&1
 
