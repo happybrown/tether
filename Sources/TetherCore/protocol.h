@@ -47,6 +47,10 @@ struct MousePacket {
     // OtherMouse 계열 이벤트에서만 의미가 있다 — 좌/우는 event_type 만으로 구분 가능하지만
     // Other 는 이 값이 없으면 어느 버튼인지 알 수 없어 뒤로/앞으로 버튼이 동작하지 않는다.
     uint8_t  button = 0;
+    // 클릭/스크롤 순간의 modifier 스냅샷 (CGEventFlags 하위 32bit). client 가 이벤트에
+    // 그대로 실어 Ctrl+클릭/Shift+드래그/Ctrl+스크롤(줌)이 held 상태 의존 없이 동작하게 한다.
+    // 매 마우스 이벤트가 자기 modifier 진실을 들고 다녀, flagsChanged 유실로 인한 오염을 차단.
+    uint32_t flags = 0;
 };
 
 // CGKeyCode = uint16_t, CGEventFlags = uint64_t (하위 32bit만 사용)
@@ -104,7 +108,7 @@ struct ProbePacket {
 
 #pragma pack(pop)
 
-static_assert(sizeof(MousePacket)      == 10, "MousePacket size changed");
+static_assert(sizeof(MousePacket)      == 14, "MousePacket size changed");
 static_assert(sizeof(KeyPacket)        == 11, "KeyPacket size changed");
 static_assert(sizeof(HelloPacket)      == 64, "HelloPacket size changed");
 static_assert(sizeof(AuthAckPacket)    == 34, "AuthAckPacket size changed");

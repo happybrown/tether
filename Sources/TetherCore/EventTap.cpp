@@ -465,6 +465,9 @@ static CGEventRef mouse_callback(CGEventTapProxy, CGEventType type, CGEventRef e
 
     MousePacket pkt{};
     pkt.event_type = type;
+    // 이 이벤트 순간의 modifier 절대 상태를 함께 실어 보낸다. client 가 클릭/드래그/스크롤
+    // 이벤트에 그대로 세팅해 held 상태 의존 없이 Ctrl+클릭 등을 재현한다 (오염 차단).
+    pkt.flags = static_cast<uint32_t>(CGEventGetFlags(event) & 0xFFFFFFFF);
 
     // Other 계열은 버튼 번호(2=휠, 3=뒤로, 4=앞으로, …)를 실어 보내야
     // client 가 어느 버튼인지 알 수 있다. 좌/우 버튼은 event_type 으로 충분.

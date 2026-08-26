@@ -210,6 +210,8 @@ void client_handle_move(const MousePacket& pkt) {
 
     if (etype == kCGEventScrollWheel) {
         CGEventRef ev = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 2, pkt.dy, pkt.dx);
+        // host 의 modifier 스냅샷을 실어 Ctrl+스크롤(화면 확대) 등이 동작하게 한다.
+        CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
         CGEventPost(kCGHIDEventTap, ev);
         CFRelease(ev);
         return;
@@ -259,6 +261,10 @@ void client_handle_move(const MousePacket& pkt) {
         btn = (pkt.button >= 2) ? (CGMouseButton)pkt.button : kCGMouseButtonCenter;
 
     CGEventRef ev = CGEventCreateMouseEvent(NULL, etype, pos, btn);
+    // host 가 실어 보낸 modifier 스냅샷을 이벤트에 직접 세팅한다. 이 값이 앱이 읽는
+    // 진실이 되므로, client OS 에 modifier 가 잘못 고착돼 있어도 클릭이 오염되지 않고
+    // 반대로 Ctrl+클릭 같은 정상 조합은 held 상태 없이도 그대로 재현된다.
+    CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
     if (is_click) {
         // host 가 dx 에 실어 보낸 클릭 카운트(1=단일,2=더블,3=트리플)를 그대로 주입한다.
         // 이 값이 있어야 더블클릭=단어선택, 트리플클릭=문단선택이 동작한다.
@@ -292,17 +298,51 @@ static CGEventFlags mask_for_modifier(CGKeyCode kc) {
     }
 }
 
+// 눌림-유지형(hold) modifier 와 그 canonical keycode. 좌/우가 같은 마스크를 공유하므로
+// 재현 시엔 대표 keycode 하나만 쓴다 (앱은 마스크만 본다). host 의 sync 목록과 일치.
+// CapsLock/Fn 은 토글·특수 동작이라 여기서 재조정하지 않고 개별 이벤트로만 처리한다.
+static const struct { CGEventFlags mask; CGKeyCode kc; } kHoldMods[] = {
+    { kCGEventFlagMaskControl,   59 },
+    { kCGEventFlagMaskShift,     56 },
+    { kCGEventFlagMaskAlternate, 58 },
+    { kCGEventFlagMaskCommand,   55 },
+};
+static const CGEventFlags kHoldMask =
+    kCGEventFlagMaskControl | kCGEventFlagMaskShift |
+    kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand;
+
+// client 가 현재 눌러둔(주입한) hold modifier 집합. recv 스레드에서만 접근하므로 잠금 불필요.
+static CGEventFlags g_held_mods = 0;
+
+// 키 이벤트 하나를 주입하는 공용 헬퍼. flags 는 앱이 읽는 modifier 진실이 된다.
+static void inject_key(CGKeyCode kc, bool down, CGEventFlags flags) {
+    CGEventRef ev = CGEventCreateKeyboardEvent(NULL, kc, down);
+    CGEventSetFlags(ev, flags);
+    CGEventPost(kCGHIDEventTap, ev);
+    CFRelease(ev);
+}
+
+// 눌린 hold modifier 집합을 target(패킷의 flags 절대 상태)에 맞춰 재조정한다.
+// edge(전환) 가 아니라 level(상태)로 다루므로, flagsChanged 전환이 유실돼도
+// 다음 아무 이벤트의 flags 로 전체가 진실로 수렴한다 (고착 자동 해소).
+static void reconcile_modifiers(CGEventFlags target) {
+    for (const auto& m : kHoldMods) {
+        bool want = (target      & m.mask) != 0;
+        bool have = (g_held_mods & m.mask) != 0;
+        if (want == have) continue;
+        if (want) g_held_mods |= m.mask; else g_held_mods &= ~m.mask;
+        // 재조정 후의 누적 상태를 실어 실제 flagsChanged 이벤트 열과 형태를 맞춘다.
+        inject_key(m.kc, want, g_held_mods);
+    }
+}
+
 // 원격 복귀 시 client 에 고착됐을 수 있는 modifier 를 전부 해제한다.
 // 각 modifier 키에 keyUp 을 주입하고, flags 를 0 으로 밀어 잔여 상태를 지운다.
 static void client_reset_modifiers() {
     // 좌/우 Command, Shift, Option, Control + CapsLock + Fn 의 keycode.
     static const CGKeyCode kMods[] = { 55, 54, 56, 60, 58, 61, 59, 62, 57, 63 };
-    for (CGKeyCode kc : kMods) {
-        CGEventRef up = CGEventCreateKeyboardEvent(NULL, kc, false);
-        CGEventSetFlags(up, 0);
-        CGEventPost(kCGHIDEventTap, up);
-        CFRelease(up);
-    }
+    for (CGKeyCode kc : kMods) inject_key(kc, false, 0);
+    g_held_mods = 0;   // 재조정 기준 상태도 초기화
     TETHER_INFO(CAT_EVENT, "[client] all modifiers released (return)");
 }
 
@@ -313,21 +353,22 @@ void client_handle_key(const KeyPacket& pkt) {
     }
     client_wake_display();
 
-    // flagsChanged 는 그 자체로 down/up 구분이 없다. 해당 modifier 의 flag 가
-    // 아직 켜져 있으면 눌린 것, 꺼졌으면 뗀 것으로 판정한다.
-    // (무조건 up 으로 주입하면 HID 상태와 flags 가 어긋나 Ctrl 등이 눌린 것처럼 고착된다.)
-    bool key_down;
+    // 모든 키 이벤트의 flags 를 절대 진실로 삼아 hold modifier 를 먼저 재조정한다.
+    // 이 한 번으로 유실된 flagsChanged 전환(눌림/뗌)까지 자동 교정된다.
+    reconcile_modifiers((CGEventFlags)pkt.flags);
+
     if (pkt.event_type == EVENT_FLAGS_CHANGE) {
+        // Ctrl/Shift/Opt/Cmd 는 위 재조정이 이미 처리했다.
         CGEventFlags m = mask_for_modifier(pkt.keycode);
-        key_down = m != 0 && ((CGEventFlags)pkt.flags & m) != 0;
-    } else {
-        key_down = (pkt.event_type == EVENT_KEY_DOWN);
+        if (m & kHoldMask) return;
+        // CapsLock/Fn 등 토글형: flag 유무로 down/up 을 판정해 개별 주입한다.
+        bool key_down = m != 0 && ((CGEventFlags)pkt.flags & m) != 0;
+        inject_key(pkt.keycode, key_down, (CGEventFlags)pkt.flags);
+        return;
     }
 
-    CGEventRef ev = CGEventCreateKeyboardEvent(NULL, pkt.keycode, key_down);
-    CGEventSetFlags(ev, (CGEventFlags)pkt.flags);
-    CGEventPost(kCGHIDEventTap, ev);
-    CFRelease(ev);
+    // 일반 키: down/up 을 주입한다. modifier flags 는 재조정으로 이미 일치한다.
+    inject_key(pkt.keycode, pkt.event_type == EVENT_KEY_DOWN, (CGEventFlags)pkt.flags);
 }
 
 // ── 잠금 화면 동기화 ──────────────────────────────────────────────────

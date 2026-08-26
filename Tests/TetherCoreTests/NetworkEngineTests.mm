@@ -93,7 +93,8 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     pkt.dy = 5;
     pkt.event_type = 25;   // kCGEventOtherMouseDown
     pkt.button = 99;       // 잘려 나가야 하는 값
-    client.send_raw_any(&pkt, sizeof(MousePacket) - 1);   // button 필드 제외 9바이트 전송
+    // button·flags 필드가 없던 9바이트 구버전 전송 → button=0, flags=0 으로 폴백돼야 한다.
+    client.send_raw_any(&pkt, offsetof(MousePacket, button));
 
     bool ok = wait_for(received);
     host.stop();
@@ -104,6 +105,7 @@ static bool wait_for(std::atomic<bool>& flag, int timeout_ms = 500) {
     XCTAssertEqual(got.dy, 5);
     XCTAssertEqual(got.event_type, 25u);
     XCTAssertEqual(got.button, 0);
+    XCTAssertEqual(got.flags, 0u);
 }
 
 // KeyPacket 송수신

@@ -413,8 +413,9 @@ private:
     void dispatch(const uint8_t* buf, ssize_t n, const sockaddr_in& sender) {
         uint8_t type = buf[0];
         if (type == PACKET_MOUSE && on_mouse &&
-            (n == (ssize_t)sizeof(MousePacket) || n == (ssize_t)sizeof(MousePacket) - 1)) {
-            // 구버전(button 필드 없는 9바이트)도 수용 — button=0 이면 기존 동작(center)과 동일.
+            n >= (ssize_t)offsetof(MousePacket, button) && n <= (ssize_t)sizeof(MousePacket)) {
+            // button(1B)·flags(4B) 는 나중에 추가된 append-only 필드다. 이들이 없는 구버전
+            // 크기(9·10B)도 수용하고, 부족한 뒷부분은 0(=버튼 center, modifier 없음)으로 채운다.
             MousePacket p{};
             std::memcpy(&p, buf, n);
             on_mouse(p);
